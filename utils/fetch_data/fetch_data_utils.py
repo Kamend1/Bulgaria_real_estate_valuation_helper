@@ -44,6 +44,33 @@ DEAL_TYPE_CONFIG = {
     },
 }
 
+PROPERTY_TYPE_SLUGS = {
+    "ednostaen",
+    "dvustaen",
+    "tristaen",
+    "chetiristaen",
+    "mnogostaen",
+    "mezonet",
+    "atelie-tavan",
+    "staya",
+
+    "kashta",
+    "etazh-ot-kashta",
+    "vila",
+
+    "partsel",
+    "zemedelska-zemya",
+    "myasto",
+
+    "magazin",
+    "ofis",
+    "sklad",
+    "promishleno-pomeshtenie",
+    "biznes-imot",
+    "garazh-parkomyasto",
+    "zavedenie",
+    "hotel",
+}
 
 # 1 Class for Scrape Selection
 class ScrapeSelection:
