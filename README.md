@@ -1,5 +1,12 @@
 # Оценка на жилищни имоти — България
 
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?logo=fastapi&logoColor=white)
+![LightGBM](https://img.shields.io/badge/LightGBM-4.5-blue?logo=lightgbm&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 Проект за machine learning анализ и оценка на пазарната стойност на жилищни имоти в България. Данните се набавят чрез автоматично събиране от imot.bg, обработват се с feature engineering pipeline и се подават на регресионен модел (LightGBM), предсказващ цена на квадратен метър. Резултатите се достъпват чрез FastAPI уеб приложение за оценки и сравнителен анализ.
 
 ---
@@ -9,7 +16,6 @@
 - [Архитектура](#архитектура)
 - [Notebook pipeline](#notebook-pipeline)
 - [FastAPI приложение](#fastapi-приложение)
-- [Инсталация и стартиране](#инсталация-и-стартиране)
 - [Структура на проекта](#структура-на-проекта)
 - [ML модел — статус и развитие](#ml-модел--статус-и-развитие)
 
@@ -17,7 +23,7 @@
 
 ## Архитектура
 
-```
+```text
 imot.bg
    │
    ▼
@@ -62,7 +68,7 @@ jupyter notebook
 Fetch-ва sitemap index-а на imot.bg, обхожда всички child sitemaps и извлича валидните `/obiavi/` URL-и. Резултатът са три taxonomy CSV-та, необходими за scraping-а:
 
 | Файл | Съдържание |
-|---|---|
+| --- | --- |
 | `data/taxonomy/valid_deal_types.csv` | `prodazhbi` / `naemi` |
 | `data/taxonomy/valid_geo_paths.csv` | ~5 500 (deal_type, geo_path) комбинации |
 | `data/taxonomy/valid_property_types.csv` | 22 типа имоти |
@@ -78,14 +84,15 @@ Fetch-ва sitemap index-а на imot.bg, обхожда всички child site
 Зарежда taxonomy CSV-тата, строи `ScrapeSelection` от избраните deal types × geo paths × property types и стартира паралелен crawl.
 
 **Ключови характеристики:**
-- Параллелно обхождане на маршрути с `ThreadPoolExecutor` (max 12 workers)
+
+- Паралелно обхождане на маршрути с `ThreadPoolExecutor` (max 12 workers)
 - Crash-resumable checkpoint файлове — при прекъсване продължава от последния завършен маршрут
 - HTML файловете се записват в `data/raw_listing_html/<url_hash>.html`
 - Parsed данните се записват в `data/parsed_sales_runs/<run_id>/parsed_listings.csv`
 
 **Изходни файлове:**
 
-```
+```text
 data/parsed_sales_runs/<run_id>/
   route_results.csv         # един ред на маршрут (checkpoint)
   page_results.csv          # един ред на тествана страница
@@ -103,6 +110,7 @@ LATEST_RUN = "parsed_sales_full_20260608_081646"
 ```
 
 **imot.bg специфики:**
+
 - Страниците са кодирани в **Windows-1251** — всички fetch-ове декодират с `content.decode("windows-1251", errors="replace")`
 - Глобален семафор ограничава едновременните HTTP заявки до 8
 
@@ -115,6 +123,7 @@ LATEST_RUN = "parsed_sales_full_20260608_081646"
 Exploratory Data Analysis и трансформации върху parsed данните. Произвежда `imot_ml_ready.parquet` — готов за ML датасет.
 
 **Основни трансформации:**
+
 - Нормализация на deal type (`Продава` → `sale`, `Дава под наем` → `rent`)
 - Парсване на дата на публикуване от български формат (`"31 яну, 2014"`)
 - Geo категоризация: `sofia_center` / `sofia_other` / `large_regional_city` / `regional_city` / `small_city` / `sea_resort` / `mountain_resort` / `other_unknown` / `foreign`
@@ -133,11 +142,13 @@ Exploratory Data Analysis и трансформации върху parsed дан
 LightGBM регресия за предсказване на `price_per_sqm`.
 
 **Методология:**
+
 - `LGBMRegressor` в sklearn `Pipeline` с `ColumnTransformer`
 - `GridSearchCV` с `PredefinedSplit` (train / validation без data leakage)
 - Target: `price_per_sqm` (EUR/кв.м)
 
 **Анализ на резултатите:**
+
 - Accuracy bands: в рамките на ±5%, ±10%, ±15%, ±20%
 - Error breakdown по тип имот, град и ценови диапазон
 - Feature importance
@@ -148,17 +159,26 @@ LightGBM регресия за предсказване на `price_per_sqm`.
 
 ## FastAPI приложение
 
-Приложението интегрира scraping pipeline-а (Notebook 01 + 02) и го прави достъпен чрез уеб интерфейс. Данните се съхраняват в PostgreSQL.
+Приложението интегрира scraping pipeline-а (Notebook 01 + 02) и предоставя пълен инструментариум за пазарен анализ и изготвяне на оценки на жилищни имоти. Данните се съхраняват в PostgreSQL.
 
-### Функционалност
+### Начална страница (`/`)
 
-- **Scrape**: стартиране, наблюдение и спиране на scrape run с live progress (SSE)
-- **Listings**: търсене и преглед на обяви
-- **Comparables**: инструмент за сравнителен анализ при оценки
+Dashboard с обобщена статистика за базата данни в реално време:
 
-### Scrape run — поток
+- Брой активни обяви за продажба и наем
+- Средна цена на квадратен метър (продажби / наеми)
+- Разпределение по geo категория (топ 6 локации)
+- Дата на последното засичане
 
-```
+---
+
+### Scrape (`/scrape/`)
+
+Управление на scrape run-ове — набавяне и актуализиране на данните.
+
+**Поток при стартиране:**
+
+```text
 POST /scrape/start
   1. refresh_taxonomy()          ← imot.bg sitemap → 3 taxonomy CSV-та
   2. sync taxonomy → PostgreSQL  ← за UI филтри
@@ -166,10 +186,82 @@ POST /scrape/start
   4. collect listing URLs        ← паралелен crawl, crash-resumable
   5. download + parse HTML       ← паралелен download, crash-resumable
   6. ingest → PostgreSQL         ← upsert listings + listing_snapshots
-  7. archive stale listings      ← при пълно национално покритие
+  7. archive stale listings      ← само при пълно национално покритие
 ```
 
-Scrape-ът върви като **отделен OS процес** (subprocess) — независим от uvicorn. При рестарт на сървъра текущият run продължава.
+**Функционалност:**
+
+- Избор на deal types, geo пътища и типове имоти преди стартиране
+- **Live прогрес в реално време** — SSE (Server-Sent Events) с фаза, брой маршрути, изтеглени и вписани обяви
+- **Спиране** на активен run с незабавно убиване на процеса (`taskkill /F` на Windows)
+- **Възобновяване** от последния checkpoint — не губи свършената работа
+- **Guard** срещу паралелно стартиране на два run-а едновременно
+- **История** на всички run-ове с резултати (`/scrape/history`)
+
+Scrape-ът върви като **отделен OS процес** (subprocess) — независим от uvicorn. При рестарт на сървъра текущият run продължава, а стартиращата страница автоматично засича и показва активния run.
+
+---
+
+### Listings (`/listings/`)
+
+Търсене и преглед на всички обяви в базата данни.
+
+**Търсачка с филтри:**
+
+- Deal type (продажба / наем)
+- Тип имот (22 типа от taxonomy)
+- Град (динамичен списък с брой обяви)
+- Квартал (динамично зарежда се при избор на град)
+- Geo категория (sofia_center, large_regional_city, sea_resort и др.)
+- Ценови диапазон (мин/макс обща цена)
+- Площ (мин/макс кв.м)
+- Цена/кв.м (мин/макс)
+
+**Сортиране:** последно виждан, цена ↑↓, цена/кв.м ↑↓, площ ↑↓
+
+**Резултати:**
+
+- Пагинация (50 на страница, HTMX partial reload)
+- **Ценови тренд** за всяка обява: нова / поскъпнала / поевтиняла / непроменена (спрямо предишния snapshot)
+- Select-all до 5 000 обяви за добавяне в comparable pool
+
+**Детайлна страница** (`/listings/{id}`):
+
+- Пълна информация за обявата (площ, етаж, конструкция, година, особености)
+- **История на цените** — таблица с всички snapshots: дата, цена, цена/кв.м, площ, дни на пазара
+
+---
+
+### Comparables (`/comparables/`)
+
+Инструмент за изготвяне на сравнителен пазарен анализ при оценки на имоти.
+
+**Оценъчен доклад (draft):**
+
+- Описание на оценявания обект: адрес, град, площ, етаж/общо, конструкция, година, описание, дата на оценката
+- Поддържа множество доклади; нов draft зачиства comparable pool-а
+
+**Comparable pool — продажни и наемни сравними:**
+
+- Добавяне на обяви директно от търсачката (единично или select-all)
+- Премахване на отделни записи или изчистване на целия pool
+- **Pinning** — маркиране на до 6 сравними на тип за включване в доклада
+- **Корекция в %** и аналитична бележка на всеки comparable (напр. -5% за лошо изложение)
+- Автоматично изчисляване на коригирана цена/кв.м след корекцията
+
+**Статистики на pool-а** (изчислени в реално време):
+
+- Брой сравними, мин/ср/макс цена и площ
+- Цена/кв.м: мин, средна, медиана, Q25, Q75, макс
+
+**Excel export** (`/comparables/export/excel`):
+
+- Стилизиран `.xlsx` файл с отделен worksheet за продажни и наемни сравними
+- Pinned обяви са маркирани в зелено; оценяваният обект — в жълто
+- Статистически ред с обобщение на пула
+- Auto-width на колоните
+
+---
 
 ### Стартиране (локално)
 
@@ -201,20 +293,20 @@ uvicorn app.main:app --reload
 ### DB схема (основни таблици)
 
 | Таблица | Описание |
-|---|---|
-| `scrape_runs` | Всеки scrape run с прогрес, статус, PID |
-| `listings` | Обяви — upsert key: `ad_url` |
-| `listing_snapshots` | Append-only история на цените |
+| --- | --- |
+| `scrape_runs` | Всеки scrape run с прогрес, статус, PID, heartbeat |
+| `listings` | Обяви — upsert key: `ad_url`; статус: active / archived |
+| `listing_snapshots` | Append-only ценова история на всяка обява |
 | `taxonomy_geo_paths` | Валидни geo пътища от sitemap |
-| `taxonomy_property_types` | 22 типа имоти |
-| `comparable_pool` | Пул от сравними имоти за оценки |
-| `appraisal_reports` | Генерирани оценъчни доклади |
+| `taxonomy_property_types` | 22 типа имоти с Bulgarian display names |
+| `comparable_pool` | Пул от сравними: корекции, pins, бележки |
+| `appraisal_reports` | Оценъчни доклади с данни за оценявания обект |
 
 ---
 
 ## Структура на проекта
 
-```
+```text
 ├── notebooks/
 │   ├── 01_imot_bg_scraper_tool.ipynb
 │   ├── 02_imot_bg_query_tool.ipynb
@@ -255,14 +347,16 @@ uvicorn app.main:app --reload
 
 ## ML модел — статус и развитие
 
-Настоящата ML реализация (Notebook 04) е **базова версия** и предстои активно развитие:
+Настоящата ML реализация (Notebook 04) е **базова версия** и предстои активно развитие.
 
 **Текущо състояние:**
+
 - LightGBM регресия с `GridSearchCV`
 - Features: тип имот, локация (geo категория), площ, етаж, конструкция, година
 - Трениран на исторически snapshot (~165 000 обяви)
 
 **Планирано развитие:**
+
 - Автоматично пре-трениране при всеки scrape run
 - Включване на времеви features (дни на пазара, сезонност)
 - По-гранулирана geo репрезентация (квартал-ниво)
