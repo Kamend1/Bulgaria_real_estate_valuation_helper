@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}История — Засичане{% endblock %}
+
+{% block content %}
+<h1>История на засичанията</h1>
+
+{% if runs %}
+<table>
+  <thead>
+    <tr>
+      <th>ID</th><th>Статус</th><th>Стартирано</th><th>Приключено</th>
+      <th>Маршрути</th><th>Обяви намерени</th><th>Описани</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for run in runs %}
+    <tr class="status-{{ run.status }}">
+      <td><code>{{ run.id | string | truncate(12, true, '') }}</code></td>
+      <td>{{ run.status }}</td>
+      <td>{{ run.started_at.strftime('%d.%m.%Y %H:%M') if run.started_at else '—' }}</td>
+      <td>{{ run.finished_at.strftime('%d.%m.%Y %H:%M') if run.finished_at else '—' }}</td>
+      <td>{{ run.routes_done or 0 }}/{{ run.routes_total or '?' }}</td>
+      <td>{{ run.listings_found or 0 }}</td>
+      <td>{{ run.listings_upserted or 0 }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p>Все още няма засичания.</p>
+{% endif %}
+{% endblock %}

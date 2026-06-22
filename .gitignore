@@ -1,48 +1,51 @@
-# Python cache / compiled files
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 
-# Virtual environments
+# ── Virtual environments ──────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 ENV/
 
-# Environment variables / secrets
+# ── Environment / secrets ─────────────────────────────────────────────────────
+# .env.example is intentionally tracked — only ignore the real secrets files
 .env
-.env.*
+.env.local
+.env.*.local
 *.secret
 secrets.*
 
-# Jupyter
+# ── Data — heavy/raw, never committed ────────────────────────────────────────
+data/
+notebooks/data/
+
+# ── Generated outputs ─────────────────────────────────────────────────────────
+outputs/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 .virtual_documents/
 **/.virtual_documents/
 
-# IPython
+# ── IPython ───────────────────────────────────────────────────────────────────
 profile_default/
 ipython_config.py
 
-# Data folders - ignore heavy/raw data folders
-data/
-datasets/
-raw/
-processed/
-raw_financial_facts_parquet/
-
-# But allow CSV/Parquet outside ignored folders
-# Do NOT globally ignore *.csv or *.parquet
-
-# Excel / heavy binary data files
+# ── Binary data / model artifacts ────────────────────────────────────────────
 *.xlsx
 *.xls
 *.h5
 *.hdf5
 *.feather
+*.pkl
+*.pickle
+*.joblib
+*.onnx
 
-# Local databases
+# ── Local databases ───────────────────────────────────────────────────────────
 *.duckdb
 *.duckdb.wal
 *.duckdb.tmp
@@ -50,25 +53,11 @@ raw_financial_facts_parquet/
 *.sqlite
 *.sqlite3
 
-# Model artifacts
-models/
-*.pkl
-*.pickle
-*.joblib
-*.onnx
-
-# Generated outputs
-outputs/
-reports/
-figures/
-plots/
-artifacts/
-
-# Logs
+# ── Logs ──────────────────────────────────────────────────────────────────────
 logs/
 *.log
 
-# Test / coverage outputs
+# ── Test / coverage ───────────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 .coverage.*
@@ -76,7 +65,7 @@ htmlcov/
 .tox/
 .nox/
 
-# Python packaging / build artifacts
+# ── Python packaging / build ──────────────────────────────────────────────────
 build/
 dist/
 *.egg-info/
@@ -84,19 +73,19 @@ dist/
 *.egg
 MANIFEST
 
-# Type checking / linting caches
+# ── Type checking / linting caches ───────────────────────────────────────────
 .mypy_cache/
 .pytype/
 .pyre/
 .ruff_cache/
 
-# IDE / editor files
+# ── IDE / editor ──────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 tempCodeRunnerFile.py
 
-# OS files
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

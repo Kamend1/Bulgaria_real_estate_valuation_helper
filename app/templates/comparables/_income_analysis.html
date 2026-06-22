@@ -1,0 +1,246 @@
+{# Income approach analysis panel — rendered below the comparables tabs #}
+{% set rent_median  = pool_rent.stats.median  if pool_rent.stats else '' %}
+{% set sale_median  = pool_sale.stats.median  if pool_sale.stats else '' %}
+
+<section class="income-panel card" id="income-panel">
+  <h2>Доходен анализ</h2>
+
+  <div class="income-grid">
+
+    <!-- LEFT: Inputs -->
+    <div class="income-inputs">
+      <h3>Входни данни</h3>
+
+      <div class="income-group">
+        <label class="income-label">Наем/кв.м/мес (EUR)
+          <span class="income-hint">↑ от наемния пул</span>
+        </label>
+        <input type="number" id="inc-rent" step="0.1" min="0"
+               value="{{ rent_median or '' }}"
+               placeholder="{{ 'от наемен пул' if not rent_median else '' }}"
+               oninput="calcIncome()">
+      </div>
+
+      <div class="income-group">
+        <label class="income-label">Продажна цена/кв.м (EUR)
+          <span class="income-hint">↑ от продажния пул</span>
+        </label>
+        <input type="number" id="inc-sale" step="1" min="0"
+               value="{{ sale_median or '' }}"
+               placeholder="{{ 'от продажен пул' if not sale_median else '' }}"
+               oninput="calcIncome()">
+      </div>
+
+      <div class="income-row-2">
+        <div class="income-group">
+          <label class="income-label">Разходи %
+            <span class="income-hint">данъци, поддръжка</span>
+          </label>
+          <input type="number" id="inc-expenses" step="0.5" min="0" max="100"
+                 value="20" oninput="calcIncome()">
+        </div>
+        <div class="income-group">
+          <label class="income-label">Незаетост %
+            <span class="income-hint">периоди без наемател</span>
+          </label>
+          <input type="number" id="inc-vacancy" step="0.5" min="0" max="100"
+                 value="8" oninput="calcIncome()">
+        </div>
+      </div>
+
+      <div class="income-row-2">
+        <div class="income-group">
+          <label class="income-label">Cap Rate %
+            <span class="income-hint">изисквана доходност</span>
+          </label>
+          <input type="number" id="inc-caprate" step="0.1" min="0.1"
+                 value="7" oninput="calcIncome()">
+        </div>
+        <div class="income-group">
+          <label class="income-label">Ръст наем %/год
+            <span class="income-hint">очакван ръст</span>
+          </label>
+          <input type="number" id="inc-growth" step="0.1"
+                 value="2" oninput="calcIncome()">
+        </div>
+      </div>
+
+      <div class="income-row-2">
+        <div class="income-group">
+          <label class="income-label">Хоризонт (год.)
+            <span class="income-hint">период на задържане</span>
+          </label>
+          <input type="number" id="inc-period" step="1" min="1" max="30"
+                 value="5" oninput="calcIncome()">
+        </div>
+        <div class="income-group">
+          <label class="income-label">Терм. Cap Rate %
+            <span class="income-hint">cap rate при изход</span>
+          </label>
+          <input type="number" id="inc-terminal" step="0.1" min="0.1"
+                 value="7.5" oninput="calcIncome()">
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Results -->
+    <div class="income-results">
+      <h3>Резултати</h3>
+
+      <div class="yield-block">
+        <div class="yield-row yield-gross">
+          <span class="yield-label">Брутна доходност</span>
+          <span class="yield-value" id="res-gross-yield">—</span>
+        </div>
+        <div class="yield-row yield-net">
+          <span class="yield-label">Нетна доходност (след разходи и незаетост)</span>
+          <span class="yield-value" id="res-net-yield">—</span>
+        </div>
+        <div class="yield-row">
+          <span class="yield-label">NOI / кв.м / год.</span>
+          <span class="yield-value" id="res-noi">—</span>
+        </div>
+      </div>
+
+      <div class="value-block">
+        <div class="value-card" id="card-direct">
+          <div class="value-method">Директна капитализация</div>
+          <div class="value-formula">NOI / Cap Rate</div>
+          <div class="value-result" id="res-direct">—</div>
+          <div class="value-diff" id="diff-direct"></div>
+        </div>
+        <div class="value-card" id="card-dcf">
+          <div class="value-method">DCF (<span id="res-period">5</span> год.)</div>
+          <div class="value-formula">ΣPV(NOI) + PV(Изход)</div>
+          <div class="value-result" id="res-dcf">—</div>
+          <div class="value-diff" id="diff-dcf"></div>
+        </div>
+      </div>
+
+      <div class="dcf-table-wrap" id="dcf-table-wrap" style="display:none">
+        <h4>DCF таблица по години</h4>
+        <table class="dcf-table">
+          <thead>
+            <tr>
+              <th>Год.</th>
+              <th>NOI/кв.м</th>
+              <th>PV фактор</th>
+              <th>PV(NOI)</th>
+            </tr>
+          </thead>
+          <tbody id="dcf-tbody"></tbody>
+          <tfoot>
+            <tr class="dcf-terminal">
+              <td colspan="3">Терминална стойност (PV)</td>
+              <td id="dcf-tv"></td>
+            </tr>
+            <tr class="dcf-total">
+              <td colspan="3"><strong>Стойност/кв.м (DCF)</strong></td>
+              <td id="dcf-total"></td>
+            </tr>
+          </tfoot>
+        </table>
+        <button type="button" onclick="toggleDcfTable()" class="btn-clear btn-sm"
+                style="margin-top:0.4rem" id="btn-dcf-toggle">▲ Скрий таблицата</button>
+      </div>
+      <button type="button" onclick="toggleDcfTable()" class="btn-clear btn-sm"
+              id="btn-dcf-show" style="margin-top:0.5rem">▼ Покажи DCF таблица</button>
+
+    </div>
+  </div>
+</section>
+
+<script>
+function _v(id) { return parseFloat(document.getElementById(id).value) || 0; }
+function _fmt(n) { return n > 0 ? Math.round(n).toLocaleString('bg') + ' EUR/кв.м' : '—'; }
+function _pct(n) { return n > 0 ? n.toFixed(2) + ' %' : '—'; }
+
+function calcIncome() {
+  const rent      = _v('inc-rent');
+  const salePrice = _v('inc-sale');
+  const expenses  = _v('inc-expenses') / 100;
+  const vacancy   = _v('inc-vacancy')  / 100;
+  const capRate   = _v('inc-caprate')  / 100;
+  const growth    = _v('inc-growth')   / 100;
+  const period    = Math.max(1, Math.round(_v('inc-period')));
+  const terminal  = _v('inc-terminal') / 100;
+
+  document.getElementById('res-period').textContent = period;
+
+  if (!rent) {
+    ['res-gross-yield','res-net-yield','res-noi','res-direct','res-dcf'].forEach(
+      id => document.getElementById(id).textContent = '—'
+    );
+    return;
+  }
+
+  const annualRent   = rent * 12;
+  const effectivePct = (1 - expenses) * (1 - vacancy);
+  const noi          = annualRent * effectivePct;
+
+  // Yields
+  const grossYield = salePrice > 0 ? (annualRent / salePrice) * 100 : 0;
+  const netYield   = salePrice > 0 ? (noi        / salePrice) * 100 : 0;
+
+  document.getElementById('res-gross-yield').textContent = _pct(grossYield);
+  document.getElementById('res-net-yield').textContent   = _pct(netYield);
+  document.getElementById('res-noi').textContent         = Math.round(noi) + ' EUR/кв.м';
+
+  // Direct capitalisation
+  const directVal = capRate > 0 ? noi / capRate : 0;
+  document.getElementById('res-direct').textContent = _fmt(directVal);
+  setDiff('diff-direct', directVal, salePrice);
+
+  // DCF
+  let pv = 0;
+  const rows = [];
+  let currentNOI = noi;
+  const r = capRate;  // use cap rate as discount rate
+
+  for (let t = 1; t <= period; t++) {
+    const pvFactor = 1 / Math.pow(1 + r, t);
+    const pvNOI    = currentNOI * pvFactor;
+    rows.push({ t, noi: currentNOI, pvFactor, pvNOI });
+    pv += pvNOI;
+    currentNOI *= (1 + growth);
+  }
+
+  // Terminal value: NOI in year n+1 / terminal cap rate, discounted back
+  const noiTerminal = noi * Math.pow(1 + growth, period);
+  const tvUndiscounted = terminal > 0 ? noiTerminal / terminal : 0;
+  const pvTV = tvUndiscounted / Math.pow(1 + r, period);
+  const dcfVal = pv + pvTV;
+
+  document.getElementById('res-dcf').textContent = _fmt(dcfVal);
+  setDiff('diff-dcf', dcfVal, salePrice);
+
+  // DCF table
+  const tbody = document.getElementById('dcf-tbody');
+  tbody.innerHTML = rows.map(row =>
+    `<tr><td>${row.t}</td><td>${Math.round(row.noi)}</td>` +
+    `<td>${row.pvFactor.toFixed(4)}</td><td>${Math.round(row.pvNOI)}</td></tr>`
+  ).join('');
+  document.getElementById('dcf-tv').textContent    = Math.round(pvTV);
+  document.getElementById('dcf-total').textContent = Math.round(dcfVal);
+}
+
+function setDiff(id, computed, market) {
+  const el = document.getElementById(id);
+  if (!computed || !market) { el.textContent = ''; return; }
+  const diff = ((computed - market) / market) * 100;
+  el.textContent = (diff >= 0 ? '+' : '') + diff.toFixed(1) + '% спрямо пазарна цена';
+  el.className = 'value-diff ' + (diff >= 0 ? 'diff-above' : 'diff-below');
+}
+
+function toggleDcfTable() {
+  const wrap = document.getElementById('dcf-table-wrap');
+  const btnShow = document.getElementById('btn-dcf-show');
+  const btnHide = document.getElementById('btn-dcf-toggle');
+  const hidden = wrap.style.display === 'none';
+  wrap.style.display = hidden ? '' : 'none';
+  btnShow.style.display = hidden ? 'none' : '';
+}
+
+// Initial calculation on load
+document.addEventListener('DOMContentLoaded', calcIncome);
+</script>

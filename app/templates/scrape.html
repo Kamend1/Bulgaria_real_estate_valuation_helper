@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Засичане — Имотен Оценител{% endblock %}
+
+{% block content %}
+<h1>Засичане на имот.бг</h1>
+
+<section class="card scrape-form-card">
+  <h2>Тип сделка</h2>
+  <p class="hint">Засичането покрива цялата страна и всички типове имоти.</p>
+  <form
+    hx-post="/scrape/start"
+    hx-target="#progress-panel"
+    hx-swap="innerHTML"
+    hx-encoding="multipart/form-data"
+  >
+    <div class="deal-type-row">
+      <label class="deal-type-option">
+        <input type="checkbox" name="deal_types" value="prodazhbi" checked>
+        <span>Продажби</span>
+      </label>
+      <label class="deal-type-option">
+        <input type="checkbox" name="deal_types" value="naemi" checked>
+        <span>Наеми</span>
+      </label>
+    </div>
+
+    <button type="submit" class="btn-primary btn-scrape" hx-indicator="#spinner">
+      <span id="spinner" class="htmx-indicator">⏳ </span>
+      Стартирай засичане
+    </button>
+  </form>
+</section>
+
+<div id="progress-panel" class="progress-panel"></div>
+
+{% if recent_runs %}
+<section class="card mt">
+  <h2>История на засичанията</h2>
+  <table class="scrape-history-table">
+    <thead>
+      <tr>
+        <th>Стартирано</th>
+        <th>Статус</th>
+        <th>Фаза</th>
+        <th>Маршрути</th>
+        <th>Обяви</th>
+        <th>Вписани</th>
+        <th>Последно съобщение</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for run in recent_runs %}
+      <tr class="status-{{ run.status }}">
+        <td>{{ run.started_at.strftime('%d.%m %H:%M') if run.started_at else '—' }}</td>
+        <td>
+          {% if run.status == 'completed' %}✓ Завършено
+          {% elif run.status == 'failed' %}✗ Грешка
+          {% elif run.status == 'interrupted' %}⚠ Спряно
+          {% elif run.status in ('running', 'starting') %}
+            <a href="/scrape/progress_view/{{ run.id }}">⏳ Работи</a>
+          {% else %}{{ run.status }}{% endif %}
+        </td>
+        <td>{{ run.phase or '—' }}</td>
+        <td>{{ run.routes_done or 0 }} / {{ run.routes_total or '?' }}</td>
+        <td>{{ run.listings_found or 0 }}</td>
+        <td>{{ run.listings_ingested or run.listings_upserted or 0 }}</td>
+        <td class="sub-text" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          {{ run.last_message or '—' }}
+        </td>
+        <td>
+          {% if run.status == 'interrupted' %}
+          <form action="/scrape/resume/{{ run.id }}" method="post" style="display:inline">
+            <button type="submit" class="btn-action btn-sale btn-sm">▶ Продължи</button>
+          </form>
+          {% elif run.status in ('running', 'starting') %}
+          <form action="/scrape/stop/{{ run.id }}" method="post" style="display:inline">
+            <button type="submit" class="btn-danger btn-sm">■ Спри</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

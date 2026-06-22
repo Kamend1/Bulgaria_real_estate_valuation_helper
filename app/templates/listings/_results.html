@@ -1,0 +1,88 @@
+<p class="result-count">
+  Намерени: <strong>{{ "{:,}".format(total)|replace(",", " ") if total is defined else 0 }}</strong> обяви
+  {% if pages > 1 %} — страница {{ page }} от {{ pages }}{% endif %}
+</p>
+
+{% if rows %}
+<div class="table-wrapper">
+<table class="listings-table">
+  <thead>
+    <tr>
+      <th style="width:30px">
+      <input type="checkbox" id="select-all" title="Избери/отмени всички"
+             onchange="toggleAll(this)">
+    </th>
+      <th>Тип / Местоположение</th>
+      <th>Площ</th>
+      <th>Цена EUR</th>
+      <th>
+        <span class="ppsqm-label" data-sale="Цена/кв.м" data-rent="Наем/кв.м/мес">Цена/кв.м</span>
+      </th>
+      <th>Ет.</th>
+      <th>Строит.</th>
+      <th>Тренд</th>
+      <th>Видян</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td><input type="checkbox" name="listing_ids" value="{{ r.id }}"></td>
+    <td>
+      <a class="listing-link" href="/listings/{{ r.id }}">
+        <span class="prop-type">{{ r.property_type_raw or '—' }}</span><br>
+        <span class="location-text">
+          {% if r.title_city_model %}{{ r.title_city_model }}{% endif %}
+          {% if r.title_geo_2_model %} · {{ r.title_geo_2_model }}{% endif %}
+        </span>
+      </a>
+      {% if r.deal_type_normalized == 'rent' %}
+        <span class="badge badge-rent">Наем</span>
+      {% else %}
+        <span class="badge badge-sale">Продажба</span>
+      {% endif %}
+    </td>
+    <td class="num">{{ "%.0f"|format(r.area_sqm_model) if r.area_sqm_model else '—' }} кв.м</td>
+    <td class="num">{{ "{:,.0f}".format(r.total_price)|replace(","," ") if r.total_price else '—' }}</td>
+    <td class="num">{{ "{:,.0f}".format(r.price_per_sqm_model)|replace(","," ") if r.price_per_sqm_model else '—' }}</td>
+    <td class="num">
+      {% if r.floor_model is not none %}{{ r.floor_model }}/{{ r.total_floors_model or '?' }}{% else %}—{% endif %}
+    </td>
+    <td>
+      {{ r.construction_type_model or '—' }}
+      {% if r.construction_year_model %}<small>({{ r.construction_year_model }})</small>{% endif %}
+    </td>
+    <td class="trend trend-{{ r.price_trend }}">
+      {% if r.price_trend == 'down' %}▼{% elif r.price_trend == 'up' %}▲{% elif r.price_trend == 'same' %}={% else %}★{% endif %}
+      {% if r.pct_change is not none %}
+        <small>{{ "%+.1f"|format(r.pct_change) }}%</small>
+      {% endif %}
+    </td>
+    <td class="date-cell">
+      {{ r.last_seen_at.strftime('%d.%m.%y') if r.last_seen_at else '—' }}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}
+    <a class="page-btn" hx-get="/listings/search?{{ filters.to_query_string() }}&page={{ page - 1 }}"
+       hx-target="#results" hx-swap="innerHTML">← Предишна</a>
+  {% endif %}
+  <span class="page-info">{{ page }} / {{ pages }}</span>
+  {% if page < pages %}
+    <a class="page-btn" hx-get="/listings/search?{{ filters.to_query_string() }}&page={{ page + 1 }}"
+       hx-target="#results" hx-swap="innerHTML">Следваща →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <p>Няма намерени обяви за тези критерии.</p>
+</div>
+{% endif %}

@@ -160,7 +160,84 @@ class ScrapeSelection:
         return "/".join(path_parts)
 
 
-# 2. Methods to load valid url selectors
+# 2. Refresh taxonomy from imot.bg sitemap (replicates Notebook 01)
+def refresh_taxonomy(taxonomy_dir: str | Path) -> None:
+    """
+    Fetches the imot.bg sitemap, discovers all valid geo paths and property
+    types, and overwrites the three taxonomy CSVs. Equivalent to running
+    Notebook 01 in full.
+    """
+    from collections import Counter
+
+    taxonomy_dir = Path(taxonomy_dir)
+    taxonomy_dir.mkdir(parents=True, exist_ok=True)
+
+    print("Refreshing taxonomy from imot.bg sitemap…")
+
+    index_xml = fetch_xml(SITEMAP_INDEX_URL)
+    child_sitemaps = extract_locs(index_xml)
+    print(f"Child sitemaps found: {len(child_sitemaps)}")
+
+    obiavi_urls: list[str] = []
+    for sitemap_url in child_sitemaps:
+        try:
+            xml_text = fetch_xml(sitemap_url)
+            urls = extract_locs(xml_text)
+            obiavi_urls.extend(url for url in urls if "/obiavi/" in url)
+            print(f"{sitemap_url}: {len(urls)} URLs")
+        except Exception as exc:
+            print(f"FAILED {sitemap_url}: {exc}")
+
+    print(f"/obiavi/ URLs found: {len(obiavi_urls)}")
+
+    parsed_routes = [
+        p for url in obiavi_urls
+        if (p := parse_obiavi_geo_path(url)) is not None
+    ]
+    print(f"Parsed routes: {len(parsed_routes)}")
+
+    # valid_deal_types.csv — hardcoded; imot.bg only has these two
+    deal_types = [
+        {"deal_type": "prodazhbi", "deal_type_en": "sale",  "deal_type_bg": "Продажби"},
+        {"deal_type": "naemi",     "deal_type_en": "rent",  "deal_type_bg": "Наеми"},
+    ]
+    with open(taxonomy_dir / "valid_deal_types.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["deal_type", "deal_type_en", "deal_type_bg"])
+        writer.writeheader()
+        writer.writerows(deal_types)
+
+    # valid_property_types.csv
+    property_counter = Counter(
+        r["base_property_type"]
+        for r in parsed_routes
+        if r["base_property_type"]
+    )
+    with open(taxonomy_dir / "valid_property_types.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["property_type", "route_count"])
+        for property_type, count in sorted(property_counter.items()):
+            writer.writerow([property_type, count])
+
+    # valid_geo_paths.csv
+    geo_counter = Counter(
+        (r["deal_type"], r["geo_path"])
+        for r in parsed_routes
+    )
+    with open(taxonomy_dir / "valid_geo_paths.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["deal_type", "geo_path", "geo_level_count", "geo_1", "geo_2", "geo_3", "route_count"])
+        for (deal_type, geo_path), route_count in sorted(geo_counter.items()):
+            parts = geo_path.split("/")
+            padded = parts + ["", "", ""]
+            writer.writerow([deal_type, geo_path, len(parts), padded[0], padded[1], padded[2], route_count])
+
+    print("Taxonomy refresh complete.")
+    print(f"  Deal types: {len(deal_types)}")
+    print(f"  Property types: {len(property_counter)}")
+    print(f"  Geo paths: {len(geo_counter)}")
+
+
+# 3. Methods to load valid url selectors
 def load_valid_deal_types(path: str) -> set[str]:
     """
     Loads valid_deal_types.csv
@@ -282,6 +359,12 @@ def load_completed_routes(route_results_path: Path) -> set[str]:
     return completed
 
 
+# Global concurrency cap — limits simultaneous HTTP requests to imot.bg
+# regardless of how many threads are in use (Phase 4 rate limiting).
+import threading as _threading
+_HTTP_SEMAPHORE = _threading.Semaphore(8)
+
+
 def fetch_html(
     url: str,
     delay_seconds: float = 1.0,
@@ -289,37 +372,47 @@ def fetch_html(
     timeout: int = 30,
 ) -> tuple[int, str]:
     """
-    Fetches HTML with retry/backoff.
+    Fetches HTML with retry/exponential backoff.
+    Global semaphore caps concurrent requests to imot.bg at 8.
     """
 
     last_error = None
 
     for attempt in range(1, max_retries + 1):
+        # Jitter already present: delay_seconds + random.uniform(0, 0.5)
         time.sleep(delay_seconds + random.uniform(0, 0.5))
 
-        try:
-            response = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=timeout,
-                allow_redirects=True,
-            )
+        with _HTTP_SEMAPHORE:
+            try:
+                response = requests.get(
+                    url,
+                    headers=HEADERS,
+                    timeout=timeout,
+                    allow_redirects=True,
+                )
 
-            html = response.content.decode("windows-1251", errors="replace")
+                html = response.content.decode("windows-1251", errors="replace")
 
-            if response.status_code == 200:
+                if response.status_code == 200:
+                    return response.status_code, html
+
+                if response.status_code == 429:
+                    # Rate-limited: exponential backoff, longer wait
+                    wait = 30 * (2 ** (attempt - 1))   # 30s, 60s, 120s
+                    last_error = f"status_429_rate_limited"
+                    time.sleep(wait)
+                    continue
+
+                if response.status_code in {403, 500, 502, 503, 504}:
+                    last_error = f"status_code_{response.status_code}"
+                    time.sleep(attempt * 3)   # 3s, 6s, 9s
+                    continue
+
                 return response.status_code, html
 
-            if response.status_code in {403, 429, 500, 502, 503, 504}:
-                last_error = f"status_code_{response.status_code}"
-                time.sleep(attempt * 2)
-                continue
-
-            return response.status_code, html
-
-        except Exception as exc:
-            last_error = str(exc)
-            time.sleep(attempt * 2)
+            except Exception as exc:
+                last_error = str(exc)
+                time.sleep(attempt * 3)
 
     raise RuntimeError(f"Failed to fetch {url}: {last_error}")
 

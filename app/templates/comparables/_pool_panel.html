@@ -1,0 +1,155 @@
+{% if pool.stats %}
+<div class="stats-box">
+  <div class="stats-title">Статистики за цена/кв.м ({{ ppsqm_label }}) — {{ pool.stats.n }} обяви</div>
+  <div class="stats-grid">
+    <div class="stat-cell">
+      <span class="stat-label">Минимум</span>
+      <span class="stat-value">{{ pool.stats.min_ppsqm | int }}</span>
+    </div>
+    <div class="stat-cell">
+      <span class="stat-label">Q25</span>
+      <span class="stat-value">{{ pool.stats.p25 | int }}</span>
+    </div>
+    <div class="stat-cell">
+      <span class="stat-label">Медиана</span>
+      <span class="stat-value stat-highlight">{{ pool.stats.median | int }}</span>
+    </div>
+    <div class="stat-cell">
+      <span class="stat-label">Средно</span>
+      <span class="stat-value">{{ pool.stats.mean_ppsqm | int }}</span>
+    </div>
+    <div class="stat-cell">
+      <span class="stat-label">Q75</span>
+      <span class="stat-value">{{ pool.stats.p75 | int }}</span>
+    </div>
+    <div class="stat-cell">
+      <span class="stat-label">Максимум</span>
+      <span class="stat-value">{{ pool.stats.max_ppsqm | int }}</span>
+    </div>
+  </div>
+  <div class="stats-secondary">
+    Площ: {{ pool.stats.min_area | int }}–{{ pool.stats.max_area | int }} кв.м (ср. {{ pool.stats.mean_area | int }}) &nbsp;|&nbsp;
+    Цена: {{ pool.stats.min_price | int | format_number }}–{{ pool.stats.max_price | int | format_number }} EUR (ср. {{ pool.stats.mean_price | int | format_number }})
+  </div>
+</div>
+{% endif %}
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin:0.7rem 0 0.4rem">
+  <span class="hint">
+    📌 Включени в доклад: <strong>{{ pool.pinned_count }}/{{ MAX_PINNED }}</strong>
+  </span>
+  <form action="/comparables/clear" method="post" style="display:inline">
+    <input type="hidden" name="comparable_type" value="{{ ctype }}">
+    <button class="btn-clear btn-sm"
+            onclick="return confirm('Изчисти целия пул?')">Изчисти пула</button>
+  </form>
+</div>
+
+{% if pool.rows %}
+<div class="pool-table-wrap">
+<table class="comp-table">
+  <thead>
+    <tr>
+      <th>📌</th>
+      <th>Местоположение</th>
+      <th>Площ<br>кв.м</th>
+      <th>Цена<br>EUR</th>
+      <th>{{ ppsqm_label }}</th>
+      <th>Строит.</th>
+      <th>Ет.</th>
+      <th>Кор.%</th>
+      <th>Кор.ц/кв.м</th>
+      <th>Бележки</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in pool.rows %}
+    <tr class="{{ 'row-pinned' if item.pinned_for_report else '' }}">
+      <!-- Pin toggle -->
+      <td style="text-align:center">
+        <form action="/comparables/pin/{{ item.pool_id }}" method="post" style="display:inline">
+          <button class="btn-pin {{ 'active' if item.pinned_for_report else '' }}"
+                  title="{{ 'Изключи от доклад' if item.pinned_for_report else 'Включи в доклад' }}">
+            {% if item.pinned_for_report %}📌{% else %}○{% endif %}
+          </button>
+        </form>
+      </td>
+
+      <!-- Location -->
+      <td>
+        <a href="{{ item.ad_url }}" target="_blank" class="listing-link">
+          {{ item.title_city_model or '' }}
+          {% if item.title_geo_2_model %} · {{ item.title_geo_2_model }}{% endif %}
+        </a>
+        {% if item.location_raw %}
+        <div class="sub-text">{{ item.location_raw | truncate(60) }}</div>
+        {% endif %}
+      </td>
+
+      <!-- Area -->
+      <td style="text-align:right">
+        {{ '%g' % item.area_sqm_model if item.area_sqm_model else '—' }}
+      </td>
+
+      <!-- Total price -->
+      <td style="text-align:right">
+        {{ item.total_price | int if item.total_price else '—' }}
+      </td>
+
+      <!-- ppsqm -->
+      <td style="text-align:right;font-weight:600">
+        {{ item.price_per_sqm_model | int if item.price_per_sqm_model else '—' }}
+      </td>
+
+      <!-- Construction -->
+      <td class="sub-text">
+        {{ item.construction_type_model or '—' }}
+        {% if item.construction_year_model %}<br>{{ item.construction_year_model }}{% endif %}
+      </td>
+
+      <!-- Floor -->
+      <td class="sub-text" style="text-align:center">
+        {% if item.floor_model is not none %}
+          {{ item.floor_model }}{% if item.total_floors_model %}/{{ item.total_floors_model }}{% endif %}
+        {% else %}—{% endif %}
+      </td>
+
+      <!-- Adjustment form -->
+      <td style="min-width:80px">
+        <form action="/comparables/adjustment/{{ item.pool_id }}" method="post">
+          <input type="number" step="0.1" name="adjustment_pct"
+                 value="{{ item.adjustment_pct if item.adjustment_pct else '' }}"
+                 style="width:60px;text-align:right"
+                 onchange="this.form.submit()">
+      </td>
+      <td style="text-align:right;font-weight:600">
+        {{ item.adj_ppsqm | int if item.adj_ppsqm else '—' }}
+      </td>
+      <td>
+          <input type="text" name="analyst_note"
+                 value="{{ item.analyst_note or '' }}"
+                 style="width:120px"
+                 placeholder="бележка"
+                 onchange="this.form.submit()">
+        </form>
+      </td>
+
+      <!-- Remove -->
+      <td>
+        <form action="/comparables/remove/{{ item.pool_id }}" method="post">
+          <button class="btn-remove" title="Премахни">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% else %}
+<div class="empty-state">
+  Няма обяви в анализния пул.<br>
+  <a href="/listings/">Отидете на търсенето</a>, изберете обяви и ги добавете тук.
+</div>
+{% endif %}

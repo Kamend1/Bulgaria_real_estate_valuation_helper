@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Сравними — {{ report.title }}{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Сравними — {{ report.title }}</h1>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+    <a href="/comparables/export/excel" class="btn-primary">⬇ Excel</a>
+    <form action="/comparables/new-report" method="post" style="display:inline">
+      <button class="btn-danger"
+              onclick="return confirm('Нов доклад? Анализният пул ще се изчисти.')">
+        ✚ Нов доклад
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Subject property form -->
+<section class="card" style="margin-bottom:1.2rem">
+  <h2>Оценяван имот</h2>
+  <form action="/comparables/subject" method="post">
+    <div class="subject-grid">
+      <div class="form-group">
+        <label>Заглавие на доклада</label>
+        <input type="text" name="title" value="{{ report.title or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Адрес</label>
+        <input type="text" name="subject_address" value="{{ report.subject_address or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Град</label>
+        <input type="text" name="subject_city" value="{{ report.subject_city or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Площ (кв.м)</label>
+        <input type="number" step="0.01" name="subject_area_sqm" value="{{ report.subject_area_sqm or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Етаж</label>
+        <input type="number" name="subject_floor" value="{{ report.subject_floor or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Общо етажи</label>
+        <input type="number" name="subject_total_floors" value="{{ report.subject_total_floors or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Тип строителство</label>
+        <input type="text" name="subject_construction" value="{{ report.subject_construction or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Год. на строеж</label>
+        <input type="number" name="subject_year" value="{{ report.subject_year or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Дата на оценка</label>
+        <input type="date" name="valuation_date"
+               value="{{ report.valuation_date | string if report.valuation_date else '' }}">
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:0.5rem">
+      <label>Описание / забележки</label>
+      <textarea name="subject_description" rows="2">{{ report.subject_description or '' }}</textarea>
+    </div>
+    <button type="submit" class="btn-primary" style="margin-top:0.5rem">Запази данните за обекта</button>
+  </form>
+</section>
+
+<!-- Tabs -->
+<div class="tabs">
+  <input type="radio" id="tab-sale" name="tab" checked>
+  <label for="tab-sale">
+    Продажни сравними
+    <span class="tab-count">{{ pool_sale.rows | length }}</span>
+  </label>
+
+  <input type="radio" id="tab-rent" name="tab">
+  <label for="tab-rent">
+    Наемни сравними
+    <span class="tab-count">{{ pool_rent.rows | length }}</span>
+  </label>
+
+  <!-- SALE TAB -->
+  <div class="tab-content" id="tab-content-sale">
+    {% set pool = pool_sale %}
+    {% set ctype = 'sale' %}
+    {% set ppsqm_label = 'EUR/кв.м' %}
+    {% include "comparables/_pool_panel.html" %}
+  </div>
+
+  <!-- RENT TAB -->
+  <div class="tab-content" id="tab-content-rent">
+    {% set pool = pool_rent %}
+    {% set ctype = 'rent' %}
+    {% set ppsqm_label = 'EUR/кв.м/мес' %}
+    {% include "comparables/_pool_panel.html" %}
+  </div>
+</div>
+
+<p class="hint" style="margin-top:1rem">
+  Добавете обяви от <a href="/listings/">страницата за търсене</a>.
+  📌 = включено в доклад (макс. {{ MAX_PINNED }} от всеки тип).
+</p>
+
+{% include "comparables/_income_analysis.html" %}
+{% endblock %}

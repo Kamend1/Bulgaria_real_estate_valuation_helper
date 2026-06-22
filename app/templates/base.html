@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Оценка на недвижими имоти{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {% block extra_css %}{% endblock %}
+  <script>
+    // Set --navbar-h from actual rendered height so calc(100vh - var(--navbar-h)) is exact
+    document.addEventListener('DOMContentLoaded', function() {
+      const h = document.querySelector('.navbar').offsetHeight;
+      document.documentElement.style.setProperty('--navbar-h', h + 'px');
+    });
+  </script>
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <nav class="navbar">
+    <a class="brand" href="/">Имотен Оценител</a>
+    <ul class="nav-links">
+      <li><a href="/" {% if request.url.path == '/' %}class="nav-active"{% endif %}>Начало</a></li>
+      <li><a href="/listings/" {% if request.url.path.startswith('/listings') %}class="nav-active"{% endif %}>Обяви</a></li>
+      <li><a href="/comparables/" {% if request.url.path.startswith('/comparables') %}class="nav-active"{% endif %}>Сравними</a></li>
+      <li><a href="/scrape/" {% if request.url.path.startswith('/scrape') %}class="nav-active"{% endif %}>Засичане</a></li>
+      <li><a href="#" class="nav-disabled">Доклади</a></li>
+      <li><a href="/help" {% if request.url.path.startswith('/help') %}class="nav-active"{% endif %}>Помощ</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer>
+    <p>Лична оценителска база данни &mdash; imot.bg</p>
+  </footer>
+</body>
+</html>

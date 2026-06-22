@@ -1,0 +1,115 @@
+<div class="card progress-card" id="live-progress">
+  <h3>Засичане в процес</h3>
+  <p>ID: <code>{{ run_id }}</code></p>
+
+  <div class="progress-bars">
+    <label>Маршрути</label>
+    <progress id="routes-bar" value="0" max="100"></progress>
+    <span id="routes-label">0 / ?</span>
+
+    <label>Обяви изтеглени</label>
+    <progress id="listings-bar" value="0" max="100"></progress>
+    <span id="listings-label">0 / ?</span>
+
+    <label>Вписани в БД</label>
+    <progress id="ingest-bar" value="0" max="100"></progress>
+    <span id="ingest-label">0</span>
+  </div>
+
+  <div class="phase-badge-wrap">
+    Фаза: <span id="phase-badge" class="phase-badge">—</span>
+  </div>
+
+  <div id="log-panel" class="log-panel">
+    <p class="log-line">Стартиране…</p>
+  </div>
+
+  <p id="status-msg" class="status-msg"></p>
+
+  <form id="stop-form" action="/scrape/stop/{{ run_id }}" method="post" style="margin-top:0.75rem">
+    <button type="submit" class="btn-danger btn-sm"
+            onclick="return confirm('Спиране на засичането? Прогресът до момента се запазва.')">
+      Спри засичането
+    </button>
+  </form>
+</div>
+
+<script>
+(function () {
+  const runId = {{ run_id | tojson }};
+  const es = new EventSource(`/scrape/progress/${runId}`);
+
+  const PHASE_LABELS = {
+    init: 'Инициализация', taxonomy: 'Таксономия', routes: 'Маршрути',
+    download: 'Изтегляне', ingest: 'Вписване в БД', archive: 'Архивиране', done: 'Готово',
+  };
+
+  let _lastMsg = '';
+
+  function updateUI(data) {
+    // Routes bar
+    const rt = data.routes_total || 1;
+    const rd = data.routes_done  || 0;
+    document.getElementById('routes-bar').max   = rt;
+    document.getElementById('routes-bar').value = rd;
+    document.getElementById('routes-label').textContent = `${rd} / ${rt === 1 ? '?' : rt}`;
+
+    // Download bar
+    const lt = data.listings_found      || 1;
+    const ld = data.listings_downloaded || 0;
+    document.getElementById('listings-bar').max   = lt;
+    document.getElementById('listings-bar').value = ld;
+    document.getElementById('listings-label').textContent =
+      `${ld} / ${data.listings_found || '?'}`;
+
+    // Ingest bar
+    const li = data.listings_ingested || 0;
+    document.getElementById('ingest-bar').max   = lt;
+    document.getElementById('ingest-bar').value = li;
+    document.getElementById('ingest-label').textContent = li;
+
+    // Phase
+    const phase = data.phase || '';
+    document.getElementById('phase-badge').textContent = PHASE_LABELS[phase] || phase || '—';
+
+    // Last message as log line — only if changed
+    if (data.last_message && data.last_message !== _lastMsg) {
+      _lastMsg = data.last_message;
+      appendLog(data.last_message);
+    }
+  }
+
+  function appendLog(msg) {
+    const panel = document.getElementById('log-panel');
+    const p = document.createElement('p');
+    p.className = 'log-line';
+    p.textContent = msg;
+    panel.appendChild(p);
+    if (panel.children.length > 60) panel.removeChild(panel.firstChild);
+    panel.scrollTop = panel.scrollHeight;
+  }
+
+  function finish(data, label, cssClass) {
+    updateUI(data);
+    document.getElementById('status-msg').textContent = label;
+    document.getElementById('status-msg').className = 'status-msg ' + cssClass;
+    document.getElementById('stop-form').style.display = 'none';
+    es.close();
+  }
+
+  es.addEventListener('progress', e => updateUI(JSON.parse(e.data)));
+
+  es.addEventListener('done', e => {
+    const data = JSON.parse(e.data);
+    const s = data.status;
+    if (s === 'completed')   finish(data, '✓ Засичането приключи успешно.', 'success');
+    else if (s === 'failed') finish(data, '✗ Грешка: ' + (data.error_message || '?'), 'error');
+    else                     finish(data, '⚠ Спряно. Можете да продължите от историята.', 'warning');
+  });
+
+  es.onerror = () => {
+    appendLog('Връзката е прекъсната — страницата ще се опресни след 5 сек.');
+    setTimeout(() => location.reload(), 5000);
+  };
+})();
+</script>

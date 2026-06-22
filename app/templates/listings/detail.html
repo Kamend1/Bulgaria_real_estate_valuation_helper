@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}{{ l.property_type_raw or 'Обява' }} — {{ l.title_city_model or '' }}{% endblock %}
+
+{% block content %}
+<div class="detail-layout">
+
+  <!-- Header -->
+  <div class="detail-header card">
+    <div class="detail-header-top">
+      <div>
+        <h1>{{ l.property_type_raw or 'Имот' }}</h1>
+        <p class="detail-location">
+          {% if l.title_city_model %}{{ l.title_city_model }}{% endif %}
+          {% if l.title_geo_2_model %} · {{ l.title_geo_2_model }}{% endif %}
+          {% if l.geo_category %}
+            <span class="badge badge-geo">{{ l.geo_category | replace('_', ' ') }}</span>
+          {% endif %}
+        </p>
+      </div>
+      <div class="detail-price-block">
+        {% if l.deal_type_normalized == 'rent' %}
+          <span class="badge badge-rent">Наем</span>
+          <div class="price-main">{{ "{:,.0f}".format(l.total_price)|replace(",", " ") if l.total_price else '—' }} EUR/мес</div>
+          <div class="price-sub">{{ "{:,.0f}".format(l.price_per_sqm_model)|replace(",", " ") if l.price_per_sqm_model else '—' }} EUR/кв.м/мес</div>
+        {% else %}
+          <span class="badge badge-sale">Продажба</span>
+          <div class="price-main">{{ "{:,.0f}".format(l.total_price)|replace(",", " ") if l.total_price else '—' }} EUR</div>
+          <div class="price-sub">{{ "{:,.0f}".format(l.price_per_sqm_model)|replace(",", " ") if l.price_per_sqm_model else '—' }} EUR/кв.м</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="detail-actions">
+      <a href="{{ l.ad_url }}" target="_blank" rel="noopener" class="btn-primary">↗ Отвори обявата</a>
+      <a href="/listings/" class="btn-clear">← Обратно към търсене</a>
+    </div>
+  </div>
+
+  <div class="detail-grid">
+    <!-- Left: property info -->
+    <div>
+      <!-- Info card -->
+      <section class="card">
+        <h2>Характеристики</h2>
+        <dl class="info-grid">
+          <dt>Площ</dt>
+          <dd>{{ "%.0f"|format(l.area_sqm_model) if l.area_sqm_model else '—' }} кв.м</dd>
+
+          <dt>Тип имот</dt>
+          <dd>{{ l.property_type_raw or '—' }}</dd>
+
+          <dt>Тип строителство</dt>
+          <dd>{{ l.construction_type_model or '—' }}</dd>
+
+          <dt>Год. на строеж</dt>
+          <dd>{{ l.construction_year_model or '—' }}</dd>
+
+          <dt>Етаж</dt>
+          <dd>
+            {% if l.floor_applicability == 'not_applicable_non_building' %}Неприложимо
+            {% elif l.floor_model is not none %}{{ l.floor_model }} / {{ l.total_floors_model or '?' }}
+            {% else %}—{% endif %}
+          </dd>
+
+          <dt>Дата публикуване</dt>
+          <dd>{{ l.published_date.strftime('%d.%m.%Y') if l.published_date else '—' }}</dd>
+
+          <dt>Последно виждан</dt>
+          <dd>{{ l.last_seen_at.strftime('%d.%m.%Y') if l.last_seen_at else '—' }}</dd>
+
+          <dt>Прегледи</dt>
+          <dd>{{ l.views or '—' }}</dd>
+
+          <dt>Брой удобства</dt>
+          <dd>{{ l.features_count or '—' }}</dd>
+        </dl>
+      </section>
+
+      <!-- Features -->
+      {% if features %}
+      <section class="card">
+        <h2>Удобства</h2>
+        <div class="features-list">
+          {% for feat in features %}
+          <span class="feature-tag">{{ feat }}</span>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      <!-- Description -->
+      {% if l.description_clean %}
+      <section class="card">
+        <h2>Описание</h2>
+        <p class="description-text">{{ l.description_clean }}</p>
+      </section>
+      {% endif %}
+    </div>
+
+    <!-- Right: add to comparables + snapshots -->
+    <div>
+      <!-- Add to comparables -->
+      <section class="card comp-add-card">
+        <h2>Добави към сравними</h2>
+        <form action="/comparables/add" method="post" style="display:flex;gap:0.5rem;flex-wrap:wrap">
+          <input type="hidden" name="listing_ids" value="{{ l.id }}">
+          <button type="submit" name="comparable_type" value="sale" class="btn-action btn-sale">
+            + Продажна сравнима
+          </button>
+          <button type="submit" name="comparable_type" value="rent" class="btn-action btn-rent">
+            + Наемна сравнима
+          </button>
+        </form>
+        <a href="/comparables/" class="btn-clear" style="margin-top:0.5rem;display:inline-block">
+          → Виж всички сравними
+        </a>
+      </section>
+
+      <!-- Price history -->
+      <section class="card">
+        <h2>История на цената <small>({{ snapshots | length }} записа)</small></h2>
+        {% if snapshots %}
+        <table>
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Цена EUR</th>
+              <th>EUR/кв.м</th>
+              <th>Дни на пазара</th>
+              <th>Прегледи</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for snap in snapshots %}
+          <tr>
+            <td>{{ snap.scraped_at.strftime('%d.%m.%Y') if snap.scraped_at else '—' }}</td>
+            <td class="num">
+              {{ "{:,.0f}".format(snap.total_price)|replace(",", " ") if snap.total_price else '—' }}
+            </td>
+            <td class="num">
+              {{ "{:,.0f}".format(snap.price_per_sqm_model)|replace(",", " ") if snap.price_per_sqm_model else '—' }}
+            </td>
+            <td class="num">{{ snap.days_on_market if snap.days_on_market is not none else '—' }}</td>
+            <td class="num">{{ snap.views or '—' }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="hint">Няма записана история за тази обява.</p>
+        {% endif %}
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

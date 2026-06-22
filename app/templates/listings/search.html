@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block body_class %}page-listings{% endblock %}
+{% block title %}Търсене на обяви{% endblock %}
+
+{% block content %}
+<div class="search-layout">
+
+  <!-- LEFT: Filters -->
+  <aside class="filters-panel">
+    <h2>Филтри</h2>
+    <form id="filter-form"
+          hx-get="/listings/search"
+          hx-target="#results"
+          hx-trigger="submit, change delay:400ms"
+          hx-swap="innerHTML">
+
+      <!-- Тип сделка -->
+      <label class="filter-label">Тип сделка</label>
+      <select name="deal_type">
+        <option value="" {% if not filters.deal_type %}selected{% endif %}>Всички</option>
+        <option value="sale" {% if filters.deal_type == 'sale' %}selected{% endif %}>Продажби</option>
+        <option value="rent" {% if filters.deal_type == 'rent' %}selected{% endif %}>Наеми</option>
+      </select>
+
+      <!-- Тип имот -->
+      <label class="filter-label">Тип имот</label>
+      {% if property_types %}
+      <div class="checkbox-panel" style="max-height:220px">
+        {% for slug, label, count in property_types %}
+        <label class="checkbox-option">
+          <input type="checkbox" name="property_types" value="{{ slug }}"
+            {% if slug in filters.property_types %}checked{% endif %}>
+          <span>{{ label }}</span>
+          <span class="checkbox-count">{{ count }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Пазарен сегмент -->
+      <label class="filter-label">Пазарен сегмент</label>
+      <div class="checkbox-panel" style="max-height:180px">
+        {% for val, label in geo_categories %}
+        <label class="checkbox-option">
+          <input type="checkbox" name="geo_categories" value="{{ val }}"
+            {% if val in filters.geo_categories %}checked{% endif %}>
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <!-- Населено място -->
+      <label class="filter-label">Населено място</label>
+      {% if cities %}
+      <div class="filterable-panel">
+        <input type="text" class="panel-search" placeholder="Търсете град…"
+               oninput="filterPanel(this)">
+        <div class="checkbox-panel" style="max-height:200px" id="city-panel">
+          {% for city_val, count in cities %}
+          <label class="checkbox-option">
+            <input type="checkbox" name="city" value="{{ city_val }}"
+              {% if city_val in filters.city %}checked{% endif %}
+              onchange="loadQuarters()">
+            <span>{{ city_val }}</span>
+            <span class="checkbox-count">{{ count }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+      <input type="text" name="city" value="{{ filters.city[0] if filters.city else '' }}"
+             placeholder="напр. пловдив, варна…">
+      {% endif %}
+
+      <!-- Квартал / Район -->
+      <label class="filter-label">Квартал / Район</label>
+      <input type="text" name="quarter" id="quarter-input"
+             value="{{ filters.quarter }}"
+             placeholder="напр. лозенец, младост 1…"
+             list="quarter-datalist"
+             autocomplete="off">
+      <datalist id="quarter-datalist"></datalist>
+
+      <!-- Цена -->
+      <label class="filter-label">Цена (EUR)</label>
+      <div class="range-row">
+        <input type="number" name="min_price" value="{{ filters.min_price or '' }}" placeholder="от">
+        <input type="number" name="max_price" value="{{ filters.max_price or '' }}" placeholder="до">
+      </div>
+
+      <!-- Площ -->
+      <label class="filter-label">Площ (кв.м)</label>
+      <div class="range-row">
+        <input type="number" name="min_area" value="{{ filters.min_area or '' }}" placeholder="от">
+        <input type="number" name="max_area" value="{{ filters.max_area or '' }}" placeholder="до">
+      </div>
+
+      <!-- Цена/кв.м -->
+      <label class="filter-label">Цена/кв.м (EUR)</label>
+      <div class="range-row">
+        <input type="number" name="min_ppsqm" value="{{ filters.min_ppsqm or '' }}" placeholder="от">
+        <input type="number" name="max_ppsqm" value="{{ filters.max_ppsqm or '' }}" placeholder="до">
+      </div>
+
+      <!-- Сортиране -->
+      <label class="filter-label">Сортиране</label>
+      <select name="sort">
+        {% for val, label in sort_options %}
+        <option value="{{ val }}" {% if filters.sort == val %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+
+      <button type="submit" class="btn-primary" style="width:100%;margin-top:0.9rem">Търси</button>
+      <a href="/listings/" class="btn-clear">Изчисти</a>
+    </form>
+  </aside>
+
+  <!-- RIGHT: Results -->
+  <div class="results-area">
+    <form id="comp-form" action="/comparables/add" method="post">
+
+      <!-- Action bar — always visible -->
+      <div class="action-bar-always">
+        <span class="action-hint" id="action-hint">
+          ☐ Поставете отметка на обяви за да ги добавите към сравними
+        </span>
+        <span class="action-selected" id="action-selected" style="display:none">
+          <strong id="checked-count">0</strong> обяви избрани
+        </span>
+        <div class="action-buttons">
+          <button type="button" id="btn-select-all-pages"
+                  class="btn-action btn-select-all" style="display:none"
+                  onclick="selectAllPages()">
+            Избери всички <span id="all-pages-count"></span>
+          </button>
+          <button type="submit" name="comparable_type" value="sale"
+                  id="btn-add-sale" class="btn-action btn-sale" disabled>
+            + Продажни сравними
+          </button>
+          <button type="submit" name="comparable_type" value="rent"
+                  id="btn-add-rent" class="btn-action btn-rent" disabled>
+            + Наемни сравними
+          </button>
+        </div>
+      </div>
+
+      <div id="results">
+        {% include "listings/_results.html" %}
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Filter city checkbox panel client-side
+function filterPanel(input) {
+  const term = input.value.toLowerCase();
+  document.getElementById('city-panel').querySelectorAll('.checkbox-option').forEach(el => {
+    el.style.display = el.querySelector('span').textContent.toLowerCase().includes(term) ? '' : 'none';
+  });
+}
+
+// Reload quarter datalist when city selection changes
+function loadQuarters() {
+  const cities = [...document.querySelectorAll('input[name="city"]:checked')].map(cb => cb.value);
+  if (!cities.length) { document.getElementById('quarter-datalist').innerHTML = ''; return; }
+  fetch('/listings/quarters?' + cities.map(c => 'city=' + encodeURIComponent(c)).join('&'))
+    .then(r => r.text())
+    .then(html => { document.getElementById('quarter-datalist').innerHTML = html; });
+}
+
+// ── Select-all (current page) ─────────────────────────────────────────────────
+function toggleAll(masterCb) {
+  document.querySelectorAll('input[name="listing_ids"]').forEach(cb => {
+    cb.checked = masterCb.checked;
+  });
+  syncMaster();
+  updateActionBar();
+}
+
+function syncMaster() {
+  const all  = document.querySelectorAll('input[name="listing_ids"]');
+  const chk  = document.querySelectorAll('input[name="listing_ids"]:checked');
+  const master = document.getElementById('select-all');
+  if (!master) return;
+  master.checked       = all.length > 0 && chk.length === all.length;
+  master.indeterminate = chk.length > 0 && chk.length < all.length;
+}
+
+// ── Select all pages ──────────────────────────────────────────────────────────
+let _allIdsLoaded = [];
+
+function selectAllPages() {
+  const btn = document.getElementById('btn-select-all-pages');
+  btn.textContent = 'Зарежда…';
+  btn.disabled = true;
+
+  // Build query string from the current filter form (exclude page)
+  const form = document.getElementById('filter-form');
+  const params = new URLSearchParams(new FormData(form));
+  // Remove city_checks if any (handled separately)
+  const cityChecked = [...document.querySelectorAll('input[name="city"]:checked')].map(cb => cb.value);
+
+  fetch('/listings/ids?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      _allIdsLoaded = data.ids;
+      // Remove existing hidden listing_ids injected previously
+      document.querySelectorAll('input.injected-id').forEach(el => el.remove());
+      // Add hidden inputs for all IDs
+      const form = document.getElementById('comp-form');
+      _allIdsLoaded.forEach(id => {
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'listing_ids';
+        inp.value = id;
+        inp.className = 'injected-id';
+        form.appendChild(inp);
+      });
+      updateActionBar();
+      btn.style.display = 'none';
+    })
+    .catch(() => {
+      btn.textContent = 'Грешка — опитай пак';
+      btn.disabled = false;
+    });
+}
+
+// ── Action bar ────────────────────────────────────────────────────────────────
+function updateActionBar() {
+  // Count: visible checked + injected hidden inputs
+  const visible  = document.querySelectorAll('input[name="listing_ids"]:checked').length;
+  const injected = document.querySelectorAll('input.injected-id').length;
+  const n = injected > 0 ? injected : visible;
+  const hasAny = n > 0;
+
+  document.getElementById('action-hint').style.display    = hasAny ? 'none' : '';
+  document.getElementById('action-selected').style.display = hasAny ? '' : 'none';
+  document.getElementById('checked-count').textContent    = n;
+  document.getElementById('btn-add-sale').disabled = !hasAny;
+  document.getElementById('btn-add-rent').disabled = !hasAny;
+
+  // Show "select all pages" button when master is fully checked and total > page size
+  const totalEl = document.querySelector('.result-count strong');
+  const total = totalEl ? parseInt(totalEl.textContent.replace(/\s/g, '')) : 0;
+  const pageSize = document.querySelectorAll('input[name="listing_ids"]').length;
+  const allPageBtn = document.getElementById('btn-select-all-pages');
+  const allPagesCount = document.getElementById('all-pages-count');
+  const master = document.getElementById('select-all');
+  if (allPageBtn && master && master.checked && total > pageSize && injected === 0) {
+    allPageBtn.style.display = '';
+    allPageBtn.disabled = false;
+    allPageBtn.textContent = 'Избери всички ' + total.toLocaleString('bg') + ' от всички страници';
+  } else if (allPageBtn && injected === 0) {
+    allPageBtn.style.display = 'none';
+  }
+}
+
+document.addEventListener('change', function(e) {
+  if (e.target.matches('input[name="listing_ids"]')) {
+    // Clear injected IDs if user manually changes selection
+    document.querySelectorAll('input.injected-id').forEach(el => el.remove());
+    syncMaster();
+    updateActionBar();
+  }
+});
+
+document.body.addEventListener('htmx:afterSwap', function() {
+  document.querySelectorAll('input.injected-id').forEach(el => el.remove());
+  _allIdsLoaded = [];
+  updateActionBar();
+});
+
+loadQuarters();
+</script>
+{% endblock %}

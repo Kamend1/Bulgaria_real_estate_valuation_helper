@@ -1,0 +1,87 @@
+{% if items %}
+<div class="table-wrapper">
+<table class="comp-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Местоположение / Тип</th>
+      <th>Площ</th>
+      <th>Цена EUR</th>
+      <th>{{ ppsqm_label }}</th>
+      <th>Строителство</th>
+      <th>Год.</th>
+      <th>Ет./Обш.</th>
+      <th>Корекция %</th>
+      <th>Кор. стойност</th>
+      <th>Бележка</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item in items %}
+  {% set l = item.listing %}
+  <tr>
+    <td class="num">{{ item.position }}</td>
+    <td>
+      <a href="/listings/{{ l.id }}" class="listing-link">
+        {{ l.property_type_raw or '—' }}<br>
+        <small>
+          {{ l.title_city_model or '' }}
+          {% if l.title_geo_2_model %} · {{ l.title_geo_2_model }}{% endif %}
+        </small>
+      </a>
+    </td>
+    <td class="num">{{ "%.0f"|format(l.area_sqm_model) if l.area_sqm_model else '—' }}</td>
+    <td class="num">{{ "{:,.0f}".format(l.total_price)|replace(",", " ") if l.total_price else '—' }}</td>
+    <td class="num">{{ "{:,.0f}".format(l.price_per_sqm_model)|replace(",", " ") if l.price_per_sqm_model else '—' }}</td>
+    <td>{{ l.construction_type_model or '—' }}</td>
+    <td class="num">{{ l.construction_year_model or '—' }}</td>
+    <td class="num">
+      {% if l.floor_model is not none %}{{ l.floor_model }}/{{ l.total_floors_model or '?' }}{% else %}—{% endif %}
+    </td>
+    <td>
+      <form action="/comparables/adjustment/{{ item.id }}" method="post" class="inline-form">
+        <input type="number" step="0.1" name="adjustment_pct"
+               value="{{ item.adjustment_pct }}" style="width:4rem">
+        <input type="hidden" name="analyst_note" value="{{ item.analyst_note }}">
+        <button type="submit" class="btn-tiny">✓</button>
+      </form>
+    </td>
+    <td class="num {% if item.adj_ppsqm %}{% endif %}">
+      {{ "{:,.0f}".format(item.adj_ppsqm)|replace(",", " ") if item.adj_ppsqm else '—' }}
+    </td>
+    <td>
+      <form action="/comparables/adjustment/{{ item.id }}" method="post" class="inline-form">
+        <input type="text" name="analyst_note" value="{{ item.analyst_note }}"
+               placeholder="Бележка…" style="width:9rem">
+        <input type="hidden" name="adjustment_pct" value="{{ item.adjustment_pct }}">
+        <button type="submit" class="btn-tiny">✓</button>
+      </form>
+    </td>
+    <td>
+      <form action="/comparables/remove/{{ item.id }}" method="post">
+        <button type="submit" class="btn-remove" title="Премахни">✕</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if items | length >= 1 %}
+<div class="comp-summary">
+  <strong>Средна цена/кв.м:</strong>
+  {{ "{:,.0f}".format(items | map(attribute='listing') | map(attribute='price_per_sqm_model') | select | map('float') | list | sum / (items | length))|replace(",", " ") }} EUR
+  &nbsp;|&nbsp;
+  <strong>Средна корекция:</strong>
+  {{ "%.1f"|format(items | map(attribute='adjustment_pct') | map('float') | list | sum / (items | length)) }}%
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <p>Няма избрани сравними от тип <strong>{{ comp_type }}</strong>.</p>
+  <p>Изберете обяви от <a href="/listings/">страницата за търсене</a>.</p>
+</div>
+{% endif %}
