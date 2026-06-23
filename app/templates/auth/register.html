@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Регистрация — Дигитален асистент на имотния оценител{% endblock %}
+
+{% block content %}
+<div class="auth-wrap">
+  <div class="auth-card card">
+    <h1 class="auth-title">Регистрация</h1>
+
+    {% if errors %}
+    <div class="alert alert-error">
+      {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/auth/register" novalidate>
+
+      <div class="form-group">
+        <label for="email">Имейл <span class="req">*</span></label>
+        <input type="email" id="email" name="email" class="form-control" required
+               value="{{ form.email if form else '' }}" autocomplete="email">
+      </div>
+
+      <div class="form-group">
+        <label for="username">Потребителско ime <span class="req">*</span></label>
+        <input type="text" id="username" name="username" class="form-control" required
+               value="{{ form.username if form else '' }}" autocomplete="username"
+               pattern="[A-Za-z0-9_\-]{3,}" title="Минимум 3 символа, само букви, цифри, _ и -">
+        <span class="hint">Минимум 3 символа. Само букви, цифри, _ и -</span>
+      </div>
+
+      <div class="form-group">
+        <label for="full_name">Пълно ime <span class="opt">(по избор)</span></label>
+        <input type="text" id="full_name" name="full_name" class="form-control"
+               value="{{ form.full_name if form else '' }}" autocomplete="name">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="password">Парола <span class="req">*</span></label>
+          <input type="password" id="password" name="password" class="form-control" required
+                 autocomplete="new-password" minlength="8">
+          <span class="hint">Минимум 8 символа</span>
+        </div>
+        <div class="form-group">
+          <label for="password2">Потвърди паролата <span class="req">*</span></label>
+          <input type="password" id="password2" name="password2" class="form-control" required
+                 autocomplete="new-password">
+        </div>
+      </div>
+
+      <div class="consent-block">
+        <label class="checkbox-label">
+          <input type="checkbox" name="accept_terms" value="1" required>
+          <span>Прочетох и приемам <a href="/legal/terms" target="_blank">Общите условия</a>
+          (версия {{ TERMS_VERSION }})</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" name="accept_privacy" value="1" required>
+          <span>Прочетох и приемам <a href="/legal/privacy-policy" target="_blank">Политиката за поверителност</a>
+          (версия {{ PRIVACY_VERSION }})</span>
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full">Регистрирай се</button>
+    </form>
+
+    <div class="auth-links">
+      <span>Вече имате акаунт?</span>
+      <a href="/auth/login">Влезте</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

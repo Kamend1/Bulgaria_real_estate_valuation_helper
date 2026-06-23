@@ -12,6 +12,9 @@ alembic==1.18.4
 # ── Config ────────────────────────────────────────────────────────────────────
 pydantic-settings==2.14.1
 
+# ── Authentication ────────────────────────────────────────────────────────────
+passlib[bcrypt]==1.7.4
+
 # ── Report generation (python-docx and docx2pdf must be installed separately) ─
 python-docx==1.1.2
 docx2pdf==0.1.8

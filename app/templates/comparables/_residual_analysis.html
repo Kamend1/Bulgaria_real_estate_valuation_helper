@@ -1,0 +1,446 @@
+{# Residual land value analysis panel #}
+{% set sale_q25    = pool_sale.stats.p25    | int if pool_sale.stats else 0 %}
+{% set sale_median = pool_sale.stats.median | int if pool_sale.stats else 0 %}
+{% set sale_q75    = pool_sale.stats.p75    | int if pool_sale.stats else 0 %}
+
+<section class="residual-panel card" id="residual-panel">
+  <h2>Остатъчна стойност на парцела</h2>
+  <p class="hint" style="margin-bottom:1.25rem">
+    Стойност на парцела = GDV − Разходи за развитие − Предприемаческа печалба
+    &nbsp;·&nbsp; <strong>Продажната цена/кв.м представлява цената на завършените единици</strong>
+    (апартаменти, офиси) — крайният продукт на строителния проект, не цената на парцела.
+  </p>
+
+  <div class="income-grid">
+
+    <!-- ── LEFT: Inputs ──────────────────────────────────── -->
+    <div class="income-inputs">
+
+      <!-- Парцел и ПУП -->
+      <div class="res-section">
+        <h3>Парцел и ПУП</h3>
+
+        <div class="income-group">
+          <label class="income-label">Площ на парцела (кв.м)</label>
+          <input type="number" id="res-plot" step="1" min="0"
+                 placeholder="напр. 600" oninput="calcResidual()">
+        </div>
+
+        <div class="res-derived-row" style="margin-bottom:0.65rem">
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">КЗП <span class="income-hint">застрояване</span></label>
+            <input type="number" id="res-kzp" step="0.01" min="0" max="1"
+                   placeholder="0.40" oninput="calcResidual()">
+          </div>
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">Застроена площ</label>
+            <div class="res-computed" id="res-d-footprint">—</div>
+          </div>
+        </div>
+
+        <div class="res-derived-row" style="margin-bottom:0.65rem">
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">КИЗ <span class="income-hint">интензивност</span></label>
+            <input type="number" id="res-kiz" step="0.01" min="0"
+                   placeholder="2.00" oninput="calcResidual()">
+          </div>
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">РЗП <span class="income-hint">= площ × КИЗ</span></label>
+            <div class="res-computed" id="res-d-gba">—</div>
+          </div>
+        </div>
+
+        <div style="font-size:0.78rem;color:var(--muted)">
+          Implied floors (КИЗ / КЗП): <strong id="res-d-floors">—</strong>
+        </div>
+      </div>
+
+      <!-- Реализация -->
+      <div class="res-section">
+        <h3>Реализация</h3>
+
+        <div class="res-derived-row" style="margin-bottom:0.65rem">
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">Продаваема % <span class="income-hint">от РЗП</span></label>
+            <input type="number" id="res-sellpct" step="0.5" min="0" max="100"
+                   value="80" oninput="calcResidual()">
+          </div>
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">Продаваема площ</label>
+            <div class="res-computed" id="res-d-sellarea">—</div>
+          </div>
+        </div>
+
+        <div class="income-group">
+          <label class="income-label">Продажна цена/кв.м (EUR)
+            <span class="income-hint">↑ от продажния пул</span>
+          </label>
+          <input type="number" id="res-price" step="10" min="0"
+                 value="{{ sale_median if sale_median else '' }}"
+                 placeholder="{{ 'от продажен пул' if not sale_median else '' }}"
+                 oninput="calcResidual()">
+          {% if sale_q25 and sale_q75 %}
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">
+            Пул (завършени единици): Q25 <strong>{{ sale_q25 | format_number }}</strong> ·
+            Медиана <strong>{{ sale_median | format_number }}</strong> ·
+            Q75 <strong>{{ sale_q75 | format_number }}</strong> EUR/кв.м
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="income-group">
+          <label class="income-label">GDV (Gross Development Value)</label>
+          <div class="res-computed res-computed-hl" id="res-d-gdv">—</div>
+        </div>
+
+        <div class="income-group">
+          <label class="income-label">Тип застрояване</label>
+          <select id="res-type" style="width:100%;padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:5px;font-size:0.875rem;background:var(--bg);color:var(--text)">
+            <option value="residential">Жилищно</option>
+            <option value="commercial">Търговско</option>
+            <option value="mixed">Смесено</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Разходи за развитие -->
+      <div class="res-section">
+        <h3>Разходи за развитие</h3>
+
+        <div class="income-group">
+          <label class="income-label">Строителни разходи (EUR/кв.м РЗП)</label>
+          <input type="number" id="res-const" step="10" min="0"
+                 placeholder="напр. 600" oninput="calcResidual()">
+        </div>
+
+        <div class="income-row-2">
+          <div class="income-group">
+            <label class="income-label">Проектиране %<span class="income-hint"> от строит.</span></label>
+            <input type="number" id="res-design" step="0.5" min="0" value="10" oninput="calcResidual()">
+          </div>
+          <div class="income-group">
+            <label class="income-label">Непредвидени %<span class="income-hint"> от строит.</span></label>
+            <input type="number" id="res-cont" step="0.5" min="0" value="7" oninput="calcResidual()">
+          </div>
+        </div>
+
+        <div class="income-row-2">
+          <div class="income-group">
+            <label class="income-label">Маркетинг %<span class="income-hint"> от GDV</span></label>
+            <input type="number" id="res-mkt" step="0.25" min="0" value="2.5" oninput="calcResidual()">
+          </div>
+          <div class="income-group">
+            <label class="income-label">Финансиране %<span class="income-hint"> от разходи</span></label>
+            <input type="number" id="res-fin" step="0.5" min="0" value="6" oninput="calcResidual()">
+          </div>
+        </div>
+      </div>
+
+      <!-- Предприемаческа печалба -->
+      <div class="res-section">
+        <h3>Предприемаческа печалба</h3>
+        <div class="income-group">
+          <label class="income-label">% от GDV</label>
+          <input type="number" id="res-profit" step="0.5" min="0" value="20" oninput="calcResidual()">
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── RIGHT: Results ─────────────────────────────────── -->
+    <div class="income-results">
+      <h3>Разбивка на разходите</h3>
+
+      <table class="residual-breakdown">
+        <thead>
+          <tr>
+            <th>Позиция</th>
+            <th>EUR</th>
+            <th>% от GDV</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Строителни разходи</td>
+            <td id="rb-const-eur">—</td>
+            <td id="rb-const-pct">—</td>
+          </tr>
+          <tr>
+            <td>Проектиране и консултации</td>
+            <td id="rb-design-eur">—</td>
+            <td id="rb-design-pct">—</td>
+          </tr>
+          <tr>
+            <td>Непредвидени разходи</td>
+            <td id="rb-cont-eur">—</td>
+            <td id="rb-cont-pct">—</td>
+          </tr>
+          <tr>
+            <td>Маркетинг и реализация</td>
+            <td id="rb-mkt-eur">—</td>
+            <td id="rb-mkt-pct">—</td>
+          </tr>
+          <tr>
+            <td>Финансиране</td>
+            <td id="rb-fin-eur">—</td>
+            <td id="rb-fin-pct">—</td>
+          </tr>
+          <tr class="rb-total-row">
+            <td><strong>Общо разходи за развитие</strong></td>
+            <td id="rb-total-eur">—</td>
+            <td id="rb-total-pct">—</td>
+          </tr>
+          <tr class="rb-profit-row">
+            <td>Предприемаческа печалба</td>
+            <td id="rb-profit-eur">—</td>
+            <td id="rb-profit-pct">—</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr class="rb-residual-row" id="rb-residual-row">
+            <td><strong>Остатъчна стойност на парцела</strong></td>
+            <td id="rb-residual-eur">—</td>
+            <td id="rb-residual-pct">—</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <!-- Main result card -->
+      <div class="residual-result-card" id="residual-result-card">
+        <div class="residual-result-label">Стойност на парцела</div>
+        <div class="residual-main-value" id="res-residual-eur">—</div>
+        <div class="residual-sub-values">
+          <div class="residual-sub-item">
+            <span class="residual-sub-label">EUR / кв.м парцел</span>
+            <span class="residual-sub-val" id="res-residual-sqm">—</span>
+          </div>
+          <div class="residual-sub-item">
+            <span class="residual-sub-label">EUR / кв.м РЗП</span>
+            <span class="residual-sub-val" id="res-residual-gba">—</span>
+          </div>
+        </div>
+        <div class="residual-viability" id="res-viability"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Full-width sensitivity table ─────────────────────── -->
+  <div class="sens-wrap" id="sens-wrap" style="display:none">
+    <h4>Таблица за чувствителност — EUR/кв.м парцел</h4>
+    <p class="hint" style="margin:0.15rem 0 0.6rem" id="sens-note">
+      Редове: строителни разходи (±20% от базата) &nbsp;·&nbsp;
+      Колони: продажна цена/кв.м от пула (Q25 / Q25↔Med / Медиана / Med↔Q75 / Q75)
+    </p>
+    <div style="overflow-x:auto">
+      <table class="sens-table">
+        <thead id="sens-thead"></thead>
+        <tbody id="sens-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</section>
+
+<script>
+(function () {
+  'use strict';
+
+  function _rv(id) { return parseFloat(document.getElementById(id).value) || 0; }
+  function _set(id, text) { var el = document.getElementById(id); if (el) el.textContent = text; }
+  function _fmtN(n)   { return Math.round(n).toLocaleString('bg-BG'); }
+  function _fmtEUR(n) { return _fmtN(n) + ' EUR'; }
+  function _fmtSqm(n) { return _fmtN(n) + ' кв.м'; }
+  function _pct(v, t) { return t > 0 ? (v / t * 100).toFixed(1) + '%' : '—'; }
+
+  function _compute(constCost, price, gba, sellArea, designPct, contPct, mktPct, finPct, profitPct) {
+    var gdv         = sellArea * price;
+    var constTotal  = constCost * gba;
+    var designTotal = constTotal * designPct;
+    var contTotal   = constTotal * contPct;
+    var mktTotal    = gdv * mktPct;
+    var subtotal    = constTotal + designTotal + contTotal + mktTotal;
+    var finTotal    = subtotal * finPct;
+    var totalCosts  = subtotal + finTotal;
+    var profitTotal = gdv * profitPct;
+    var residual    = gdv - totalCosts - profitTotal;
+    return { gdv: gdv, constTotal: constTotal, designTotal: designTotal,
+             contTotal: contTotal, mktTotal: mktTotal, finTotal: finTotal,
+             totalCosts: totalCosts, profitTotal: profitTotal, residual: residual };
+  }
+
+  function _sensColor(val, allVals) {
+    var maxPos = 0, minNeg = 0;
+    for (var i = 0; i < allVals.length; i++) {
+      if (allVals[i] > maxPos) maxPos = allVals[i];
+      if (allVals[i] < minNeg) minNeg = allVals[i];
+    }
+    if (val <= 0) {
+      var t = minNeg < 0 ? Math.min(1, val / minNeg) : 1;
+      var l = Math.round(97 - t * 33);
+      return 'hsl(0,75%,' + l + '%)';
+    } else {
+      var t2 = maxPos > 0 ? Math.min(1, val / maxPos) : 0;
+      var l2 = Math.round(97 - t2 * 33);
+      return 'hsl(120,55%,' + l2 + '%)';
+    }
+  }
+
+  var VARIANTS = [-0.2, -0.1, 0, 0.1, 0.2];
+  var LABELS   = ['−20%', '−10%', 'База', '+10%', '+20%'];
+
+  var POOL_Q25    = {{ sale_q25 }};
+  var POOL_MEDIAN = {{ sale_median }};
+  var POOL_Q75    = {{ sale_q75 }};
+
+  window.calcResidual = function () {
+    var plotArea = _rv('res-plot');
+    var kzp      = _rv('res-kzp');
+    var kiz      = _rv('res-kiz');
+    var sellPct  = _rv('res-sellpct') / 100;
+    var price    = _rv('res-price');
+
+    var footprint = plotArea * kzp;
+    var gba       = plotArea * kiz;
+    var floors    = (kzp > 0 && kiz > 0) ? kiz / kzp : 0;
+    var sellArea  = gba * sellPct;
+    var gdv       = sellArea * price;
+
+    _set('res-d-footprint', footprint > 0 ? _fmtSqm(footprint) : '—');
+    _set('res-d-gba',       gba       > 0 ? _fmtSqm(gba)       : '—');
+    _set('res-d-floors',    floors    > 0 ? floors.toFixed(1)   : '—');
+    _set('res-d-sellarea',  sellArea  > 0 ? _fmtSqm(sellArea)   : '—');
+    _set('res-d-gdv',       gdv       > 0 ? _fmtEUR(gdv)        : '—');
+
+    var constCost  = _rv('res-const');
+    var designPct  = _rv('res-design') / 100;
+    var contPct    = _rv('res-cont')   / 100;
+    var mktPct     = _rv('res-mkt')    / 100;
+    var finPct     = _rv('res-fin')    / 100;
+    var profitPct  = _rv('res-profit') / 100;
+
+    var BLANK_IDS = [
+      'rb-const-eur','rb-design-eur','rb-cont-eur','rb-mkt-eur','rb-fin-eur',
+      'rb-total-eur','rb-profit-eur','rb-residual-eur',
+      'rb-const-pct','rb-design-pct','rb-cont-pct','rb-mkt-pct','rb-fin-pct',
+      'rb-total-pct','rb-profit-pct','rb-residual-pct',
+      'res-residual-eur','res-residual-sqm','res-residual-gba','res-viability'
+    ];
+
+    if (!plotArea || !gba || !price || !constCost) {
+      BLANK_IDS.forEach(function(id) { _set(id, '—'); });
+      document.getElementById('sens-wrap').style.display = 'none';
+      return;
+    }
+
+    var c = _compute(constCost, price, gba, sellArea, designPct, contPct, mktPct, finPct, profitPct);
+
+    // Breakdown rows
+    var items = [
+      ['rb-const',   c.constTotal],
+      ['rb-design',  c.designTotal],
+      ['rb-cont',    c.contTotal],
+      ['rb-mkt',     c.mktTotal],
+      ['rb-fin',     c.finTotal],
+      ['rb-total',   c.totalCosts],
+      ['rb-profit',  c.profitTotal],
+      ['rb-residual', c.residual]
+    ];
+    items.forEach(function(row) {
+      _set(row[0] + '-eur', _fmtEUR(row[1]));
+      _set(row[0] + '-pct', _pct(row[1], c.gdv));
+    });
+
+    var rrow = document.getElementById('rb-residual-row');
+    rrow.className = 'rb-residual-row ' + (c.residual >= 0 ? 'positive' : 'negative');
+
+    // Result card
+    var perPlot = plotArea > 0 ? c.residual / plotArea : 0;
+    var perGBA  = gba      > 0 ? c.residual / gba      : 0;
+    _set('res-residual-eur', _fmtEUR(c.residual));
+    _set('res-residual-sqm', _fmtN(Math.round(perPlot)));
+    _set('res-residual-gba', _fmtN(Math.round(perGBA)));
+
+    var card = document.getElementById('residual-result-card');
+    var viable = c.residual >= 0;
+    card.className = 'residual-result-card ' + (viable ? 'viable' : 'not-viable');
+    _set('res-viability',
+      viable
+        ? '✔ Проектът е жизнеспособен при тези параметри'
+        : '✘ Проектът не е жизнеспособен — разходите надвишават GDV'
+    );
+
+    // Sensitivity table — columns from pool Q25/Q75 when available
+    var priceVars, priceLabels, baseColIdx;
+    var usePoolStats = POOL_Q25 > 0 && POOL_MEDIAN > 0 && POOL_Q75 > 0;
+
+    if (usePoolStats) {
+      priceVars = [
+        POOL_Q25,
+        Math.round((POOL_Q25 + POOL_MEDIAN) / 2),
+        POOL_MEDIAN,
+        Math.round((POOL_MEDIAN + POOL_Q75) / 2),
+        POOL_Q75
+      ];
+      priceLabels = [
+        'Q25 (' + _fmtN(POOL_Q25) + ')',
+        'Q25↔Med (' + _fmtN(Math.round((POOL_Q25 + POOL_MEDIAN) / 2)) + ')',
+        'Медиана (' + _fmtN(POOL_MEDIAN) + ')',
+        'Med↔Q75 (' + _fmtN(Math.round((POOL_MEDIAN + POOL_Q75) / 2)) + ')',
+        'Q75 (' + _fmtN(POOL_Q75) + ')'
+      ];
+      baseColIdx = 2; // median column
+    } else {
+      priceVars   = VARIANTS.map(function(v) { return price * (1 + v); });
+      priceLabels = LABELS;
+      baseColIdx  = 2;
+    }
+
+    var constVars = VARIANTS.map(function(v) { return constCost * (1 + v); });
+
+    var allVals = [];
+    var matrix  = constVars.map(function(cc) {
+      return priceVars.map(function(pp) {
+        var r   = _compute(cc, pp, gba, sellArea, designPct, contPct, mktPct, finPct, profitPct);
+        var val = plotArea > 0 ? r.residual / plotArea : 0;
+        allVals.push(val);
+        return val;
+      });
+    });
+
+    var thead = document.getElementById('sens-thead');
+    var tbody = document.getElementById('sens-tbody');
+
+    // Update note
+    var note = document.getElementById('sens-note');
+    if (note) {
+      note.textContent = usePoolStats
+        ? 'Редове: строителни разходи (±20% от базата) · Колони: продажна цена/кв.м от пула (Q25 / Q25↔Med / Медиана / Med↔Q75 / Q75)'
+        : 'Редове: строителни разходи · Колони: продажна цена/кв.м · Стъпка ±10% от базовата стойност';
+    }
+
+    thead.innerHTML = '<tr><th>Стр. ↓ / Цена →</th>' +
+      priceLabels.map(function(l, i) {
+        var isBase = i === baseColIdx;
+        return '<th' + (isBase ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' + l + '</th>';
+      }).join('') + '</tr>';
+
+    tbody.innerHTML = matrix.map(function(row, ri) {
+      var isBaseRow = ri === 2;
+      return '<tr>' +
+        '<th' + (isBaseRow ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' + LABELS[ri] + '</th>' +
+        row.map(function(val, ci) {
+          var isBase  = isBaseRow && ci === baseColIdx;
+          var bg      = _sensColor(val, allVals);
+          var outline = isBase ? ';outline:2px solid var(--brand);outline-offset:-2px' : '';
+          return '<td style="background:' + bg + outline + '">' + _fmtN(Math.round(val)) + '</td>';
+        }).join('') +
+        '</tr>';
+    }).join('');
+
+    document.getElementById('sens-wrap').style.display = '';
+  };
+
+  document.addEventListener('DOMContentLoaded', calcResidual);
+}());
+</script>

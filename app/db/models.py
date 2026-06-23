@@ -180,7 +180,10 @@ class AppraisalReport(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     title = Column(Text, nullable=False)
     status = Column(String(20), default="draft")
-    # draft | generated | exported
+    # draft | finalized | exported
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    owner = relationship("User", back_populates="reports")
 
     subject_address = Column(Text)
     subject_city = Column(Text)
@@ -215,7 +218,7 @@ class AppraisalReport(Base):
 
 
 class ComparablePool(Base):
-    """Unbounded analysis pool. pinned_for_report=True → included in Word/Excel report."""
+    """Per-report analysis pool. pinned_for_report=True → included in Word/Excel report."""
     __tablename__ = "comparable_pool"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -226,8 +229,11 @@ class ComparablePool(Base):
     adjustment_pct = Column(Numeric(6, 2))
     analyst_note = Column(Text)
 
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=True)
+
     __table_args__ = (
-        UniqueConstraint("listing_id", "comparable_type", name="uq_pool_listing_type"),
+        UniqueConstraint("listing_id", "comparable_type", "report_id", name="uq_pool_listing_ctype_report"),
     )
 
     listing = relationship("Listing")
@@ -251,3 +257,42 @@ class ReportComparable(Base):
 
     report = relationship("AppraisalReport", back_populates="comparables")
     listing = relationship("Listing", back_populates="report_comparables")
+
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    username = Column(String(100), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255))
+    role = Column(String(20), nullable=False, default="user")   # user | admin
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    last_login_at = Column(TIMESTAMP(timezone=True))
+
+    consents = relationship("UserConsent", back_populates="user", cascade="all, delete-orphan")
+    reports = relationship(
+        "AppraisalReport",
+        back_populates="owner",
+        order_by="AppraisalReport.updated_at.desc()",
+        cascade="all, delete-orphan",
+    )
+
+
+class UserConsent(Base):
+    __tablename__ = "user_consents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    consent_type = Column(String(50), nullable=False)   # privacy_policy | terms
+    accepted = Column(Boolean, nullable=False, default=True)
+    version = Column(String(20), nullable=False)
+    accepted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    revoked_at = Column(TIMESTAMP(timezone=True))
+    ip_address = Column(String(45))
+
+    user = relationship("User", back_populates="consents")

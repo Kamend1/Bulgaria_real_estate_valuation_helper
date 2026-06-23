@@ -1,3 +1,5 @@
+<div id="pool-panel-{{ ctype }}">
+
 {% if pool.stats %}
 <div class="stats-box">
   <div class="stats-title">Статистики за цена/кв.м ({{ ppsqm_label }}) — {{ pool.stats.n }} обяви</div>
@@ -37,17 +39,22 @@
 <div style="display:flex;justify-content:space-between;align-items:center;margin:0.7rem 0 0.4rem">
   <span class="hint">
     📌 Включени в доклад: <strong>{{ pool.pinned_count }}/{{ MAX_PINNED }}</strong>
+    &nbsp;·&nbsp; {{ pool.total_count }} обяви в пула
   </span>
-  <form action="/comparables/clear" method="post" style="display:inline">
+  <form hx-post="/comparables/clear"
+        hx-target="#pool-panel-{{ ctype }}"
+        hx-swap="outerHTML"
+        hx-confirm="Изчисти целия пул?"
+        style="display:inline">
     <input type="hidden" name="comparable_type" value="{{ ctype }}">
-    <button class="btn-clear btn-sm"
-            onclick="return confirm('Изчисти целия пул?')">Изчисти пула</button>
+    <input type="hidden" name="report_id" value="{{ report_id }}">
+    <button class="btn-clear btn-sm">Изчисти пула</button>
   </form>
 </div>
 
 {% if pool.rows %}
 <div class="pool-table-wrap">
-<table class="comp-table">
+<table class="comp-table" id="pool-table-{{ ctype }}">
   <thead>
     <tr>
       <th>📌</th>
@@ -65,10 +72,18 @@
   </thead>
   <tbody>
     {% for item in pool.rows %}
-    <tr class="{{ 'row-pinned' if item.pinned_for_report else '' }}">
+    <tr class="{{ 'row-pinned' if item.pinned_for_report else '' }}"
+        data-loc="{{ ((item.title_city_model or '') ~ ' ' ~ (item.title_geo_2_model or '') ~ ' ' ~ (item.location_raw or '')) | lower | trim }}"
+        data-area="{{ item.area_sqm_model | int if item.area_sqm_model else 0 }}"
+        data-pps="{{ item.price_per_sqm_model | int if item.price_per_sqm_model else 0 }}"
+        data-con="{{ (item.construction_type_model or '') | lower }}"
+        data-pinned="{{ 'true' if item.pinned_for_report else 'false' }}">
       <!-- Pin toggle -->
       <td style="text-align:center">
-        <form action="/comparables/pin/{{ item.pool_id }}" method="post" style="display:inline">
+        <form hx-post="/comparables/pin/{{ item.pool_id }}"
+              hx-target="#pool-panel-{{ ctype }}"
+              hx-swap="outerHTML"
+              style="display:inline">
           <button class="btn-pin {{ 'active' if item.pinned_for_report else '' }}"
                   title="{{ 'Изключи от доклад' if item.pinned_for_report else 'Включи в доклад' }}">
             {% if item.pinned_for_report %}📌{% else %}○{% endif %}
@@ -115,13 +130,15 @@
         {% else %}—{% endif %}
       </td>
 
-      <!-- Adjustment form -->
+      <!-- Adjustment + note -->
       <td style="min-width:80px">
-        <form action="/comparables/adjustment/{{ item.pool_id }}" method="post">
+        <form hx-post="/comparables/adjustment/{{ item.pool_id }}"
+              hx-target="#pool-panel-{{ ctype }}"
+              hx-swap="outerHTML">
           <input type="number" step="0.1" name="adjustment_pct"
                  value="{{ item.adjustment_pct if item.adjustment_pct else '' }}"
                  style="width:60px;text-align:right"
-                 onchange="this.form.submit()">
+                 onchange="this.form.requestSubmit()">
       </td>
       <td style="text-align:right;font-weight:600">
         {{ item.adj_ppsqm | int if item.adj_ppsqm else '—' }}
@@ -131,13 +148,15 @@
                  value="{{ item.analyst_note or '' }}"
                  style="width:120px"
                  placeholder="бележка"
-                 onchange="this.form.submit()">
-        </form>
+                 onchange="this.form.requestSubmit()">
+          </form>
       </td>
 
       <!-- Remove -->
       <td>
-        <form action="/comparables/remove/{{ item.pool_id }}" method="post">
+        <form hx-post="/comparables/remove/{{ item.pool_id }}"
+              hx-target="#pool-panel-{{ ctype }}"
+              hx-swap="outerHTML">
           <button class="btn-remove" title="Премахни">✕</button>
         </form>
       </td>
@@ -153,3 +172,8 @@
   <a href="/listings/">Отидете на търсенето</a>, изберете обяви и ги добавете тук.
 </div>
 {% endif %}
+
+<div class="pool-pagination" id="pool-pag-{{ ctype }}"></div>
+
+<script>if (window.initPool) window.initPool('{{ ctype }}');</script>
+</div>

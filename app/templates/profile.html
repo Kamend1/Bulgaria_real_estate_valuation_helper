@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Моят профил — Дигитален асистент на имотния оценител{% endblock %}
+
+{% block content %}
+<h1>Моят профил</h1>
+
+{% if saved %}
+<div class="alert alert-success">Профилът е актуализиран успешно.</div>
+{% endif %}
+{% if pw_saved %}
+<div class="alert alert-success">Паролата е сменена успешно.</div>
+{% endif %}
+
+<!-- ── Лична информация ────────────────────────────────────────────── -->
+<section class="card" style="margin-bottom:1.5rem">
+  <h2>Лична информация</h2>
+
+  {% if errors %}
+  <div class="alert alert-error">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>
+  {% endif %}
+
+  <form method="post" action="/auth/profile/update">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Имейл</label>
+        <input type="email" name="email" class="form-control" required value="{{ request.state.user.email }}">
+      </div>
+      <div class="form-group">
+        <label>Потребителско ime</label>
+        <input type="text" name="username" class="form-control" required value="{{ request.state.user.username }}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Пълно ime</label>
+      <input type="text" name="full_name" class="form-control" value="{{ request.state.user.full_name or '' }}">
+    </div>
+    <div class="form-group">
+      <label>Роля</label>
+      <input type="text" class="form-control" value="{{ 'Администратор' if request.state.user.role == 'admin' else 'Потребител' }}" readonly style="background:var(--bg);cursor:default">
+    </div>
+    <div class="form-group">
+      <label>Регистриран на</label>
+      <input type="text" class="form-control" value="{{ request.state.user.created_at.strftime('%d.%m.%Y %H:%M') }}" readonly style="background:var(--bg);cursor:default">
+    </div>
+    <button type="submit" class="btn btn-primary">Запази промените</button>
+  </form>
+</section>
+
+<!-- ── Смяна на парола ────────────────────────────────────────────── -->
+<section class="card" style="margin-bottom:1.5rem">
+  <h2>Смяна на парола</h2>
+
+  {% if pw_errors %}
+  <div class="alert alert-error">{% for e in pw_errors %}<div>{{ e }}</div>{% endfor %}</div>
+  {% endif %}
+
+  <form method="post" action="/auth/profile/change-password">
+    <div class="form-group">
+      <label>Текуща парола</label>
+      <input type="password" name="current_password" class="form-control" required autocomplete="current-password">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Нова парола</label>
+        <input type="password" name="new_password" class="form-control" required minlength="8" autocomplete="new-password">
+        <span class="hint">Минимум 8 символа</span>
+      </div>
+      <div class="form-group">
+        <label>Потвърди новата парола</label>
+        <input type="password" name="new_password2" class="form-control" required autocomplete="new-password">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-secondary">Смени паролата</button>
+  </form>
+</section>
+
+<!-- ── Управление на съгласия ─────────────────────────────────────── -->
+<section class="card" id="consents">
+  <h2>Управление на съгласия</h2>
+  <p class="hint">Преглед на дадените съгласия за обработка на лични данни. Можете да оттеглите съгласие по всяко време.</p>
+
+  {% set consent_labels = {
+    'privacy_policy': 'Политика за поверителност',
+    'terms': 'Общи условия'
+  } %}
+
+  {% if consents %}
+  <table class="help-table consent-table">
+    <thead>
+      <tr>
+        <th>Тип</th>
+        <th>Версия</th>
+        <th>Дата</th>
+        <th>Статус</th>
+        <th>Действие</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in consents %}
+      <tr class="{{ 'consent-revoked' if c.revoked_at else '' }}">
+        <td>{{ consent_labels.get(c.consent_type, c.consent_type) }}</td>
+        <td>{{ c.version }}</td>
+        <td>{{ c.accepted_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>
+          {% if c.revoked_at %}
+            <span class="badge badge-warn">Оттеглено {{ c.revoked_at.strftime('%d.%m.%Y') }}</span>
+          {% else %}
+            <span class="badge badge-ok">Активно</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if not c.revoked_at %}
+          <form method="post" action="/auth/profile/revoke-consent/{{ c.id }}"
+                onsubmit="return confirm('Сигурни ли сте, че искате да оттеглите това съгласие?')">
+            <button type="submit" class="btn btn-sm btn-danger">Оттегли</button>
+          </form>
+          {% else %}
+          —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Re-accept if latest version is missing or revoked -->
+  {% set active_types = consents | selectattr('revoked_at', 'none') | map(attribute='consent_type') | list %}
+  {% if 'privacy_policy' not in active_types %}
+  <div class="alert alert-warn" style="margin-top:1rem">
+    Нямате активно съгласие за Политиката за поверителност (v{{ PRIVACY_VERSION }}).
+    <form method="post" action="/auth/profile/accept-consent" style="display:inline">
+      <input type="hidden" name="consent_type" value="privacy_policy">
+      <button type="submit" class="btn btn-sm btn-primary" style="margin-left:.5rem">Приемам</button>
+    </form>
+  </div>
+  {% endif %}
+  {% if 'terms' not in active_types %}
+  <div class="alert alert-warn" style="margin-top:.5rem">
+    Нямате активно съгласие за Общите условия (v{{ TERMS_VERSION }}).
+    <form method="post" action="/auth/profile/accept-consent" style="display:inline">
+      <input type="hidden" name="consent_type" value="terms">
+      <button type="submit" class="btn btn-sm btn-primary" style="margin-left:.5rem">Приемам</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {% else %}
+  <p class="hint">Няма записани съгласия.</p>
+  {% endif %}
+
+  <div style="margin-top:1rem;font-size:.85rem;color:var(--muted)">
+    Вижте пълните текстове:
+    <a href="/legal/privacy-policy" target="_blank">Политика за поверителност</a> ·
+    <a href="/legal/terms" target="_blank">Общи условия</a>
+  </div>
+</section>
+{% endblock %}

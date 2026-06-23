@@ -1,0 +1,109 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db
+from app.db.models import User
+from app.dependencies import require_auth as get_current_user
+from app.templating import templates
+from app.services.comparable_service import (
+    delete_user_report,
+    finalize_user_report,
+    get_report_for_user,
+    get_user_reports,
+    new_draft,
+)
+
+router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+@router.get("/", response_class=HTMLResponse)
+async def reports_list(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    reports = get_user_reports(db, user.id)
+    active_rid = request.session.get("active_report_id")
+    return templates.TemplateResponse(
+        request,
+        "reports.html",
+        {"reports": reports, "active_report_id": active_rid},
+    )
+
+
+@router.post("/{report_id}/open")
+async def open_report(
+    report_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    report = get_report_for_user(db, report_id, user.id)
+    if not report:
+        raise HTTPException(status_code=404)
+    request.session["active_report_id"] = str(report.id)
+    return RedirectResponse(url="/comparables/", status_code=303)
+
+
+@router.post("/{report_id}/finalize")
+async def finalize_report(
+    report_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    finalize_user_report(db, report_id, user.id)
+    return RedirectResponse(url="/reports/", status_code=303)
+
+
+@router.post("/{report_id}/reopen")
+async def reopen_report(
+    report_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Set a finalized report back to draft so it can be edited again."""
+    from app.db.models import AppraisalReport
+    report = (
+        db.query(AppraisalReport)
+        .filter(AppraisalReport.id == report_id, AppraisalReport.user_id == user.id)
+        .first()
+    )
+    if not report:
+        raise HTTPException(status_code=404)
+    report.status = "draft"
+    db.commit()
+    request.session["active_report_id"] = str(report.id)
+    return RedirectResponse(url="/comparables/", status_code=303)
+
+
+@router.post("/{report_id}/delete")
+async def delete_report(
+    report_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    report = get_report_for_user(db, report_id, user.id)
+    if not report:
+        raise HTTPException(status_code=404)
+    # If this was the active report, clear session
+    if request.session.get("active_report_id") == str(report_id):
+        request.session.pop("active_report_id", None)
+    delete_user_report(db, report_id, user.id)
+    return RedirectResponse(url="/reports/", status_code=303)
+
+
+@router.post("/new")
+async def new_report(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    report = new_draft(db, user.id)
+    request.session["active_report_id"] = str(report.id)
+    return RedirectResponse(url="/comparables/", status_code=303)

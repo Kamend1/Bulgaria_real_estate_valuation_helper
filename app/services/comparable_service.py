@@ -7,37 +7,70 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.db.models import AppraisalReport, ComparablePool
 
 MAX_PINNED = 6   # max pinned-for-report per type (Word table limit)
 
 
-# ── Draft report ─────────────────────────────────────────────────────────────
+# ── Draft / report management ─────────────────────────────────────────────────
 
-def get_or_create_draft(db: Session) -> AppraisalReport:
+def get_or_create_draft(db: Session, user_id: int) -> AppraisalReport:
     draft = (
         db.query(AppraisalReport)
-        .filter(AppraisalReport.status == "draft")
-        .order_by(AppraisalReport.created_at.desc())
+        .filter(AppraisalReport.status == "draft", AppraisalReport.user_id == user_id)
+        .order_by(AppraisalReport.updated_at.desc())
         .first()
     )
     if draft is None:
-        draft = _new_draft_obj(db)
+        draft = _new_draft_obj(db, user_id)
     return draft
 
 
-def new_draft(db: Session) -> AppraisalReport:
-    return _new_draft_obj(db)
+def new_draft(db: Session, user_id: int) -> AppraisalReport:
+    return _new_draft_obj(db, user_id)
 
 
-def _new_draft_obj(db: Session) -> AppraisalReport:
-    draft = AppraisalReport(title="Нов доклад", status="draft")
+def _new_draft_obj(db: Session, user_id: int) -> AppraisalReport:
+    draft = AppraisalReport(title="Нов доклад", status="draft", user_id=user_id)
     db.add(draft)
     db.commit()
     db.refresh(draft)
     return draft
+
+
+def get_user_reports(db: Session, user_id: int) -> list[dict]:
+    rows = db.execute(text("""
+        SELECT
+            ar.id,
+            ar.title,
+            ar.status,
+            ar.created_at,
+            ar.updated_at,
+            ar.subject_address,
+            ar.subject_city,
+            ar.valuation_date,
+            count(cp.id) FILTER (WHERE cp.comparable_type = 'sale') AS sale_count,
+            count(cp.id) FILTER (WHERE cp.comparable_type = 'rent') AS rent_count,
+            count(cp.id) FILTER (WHERE cp.pinned_for_report = true)  AS pinned_count
+        FROM appraisal_reports ar
+        LEFT JOIN comparable_pool cp ON cp.report_id = ar.id
+        WHERE ar.user_id = :uid
+        GROUP BY ar.id
+        ORDER BY ar.updated_at DESC
+    """), {"uid": user_id}).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def get_report_for_user(
+    db: Session, report_id: uuid.UUID, user_id: int
+) -> AppraisalReport | None:
+    return (
+        db.query(AppraisalReport)
+        .filter(AppraisalReport.id == report_id, AppraisalReport.user_id == user_id)
+        .first()
+    )
 
 
 def update_subject(db: Session, report_id: uuid.UUID, data: dict) -> None:
@@ -55,15 +88,48 @@ def update_subject(db: Session, report_id: uuid.UUID, data: dict) -> None:
     db.commit()
 
 
+def delete_user_report(db: Session, report_id: uuid.UUID, user_id: int) -> None:
+    report = (
+        db.query(AppraisalReport)
+        .filter(AppraisalReport.id == report_id, AppraisalReport.user_id == user_id)
+        .first()
+    )
+    if report:
+        db.delete(report)
+        db.commit()
+
+
+def finalize_user_report(db: Session, report_id: uuid.UUID, user_id: int) -> None:
+    report = (
+        db.query(AppraisalReport)
+        .filter(AppraisalReport.id == report_id, AppraisalReport.user_id == user_id)
+        .first()
+    )
+    if report and report.status == "draft":
+        report.status = "finalized"
+        db.commit()
+
+
 # ── Pool operations ───────────────────────────────────────────────────────────
 
-def add_to_pool(db: Session, listing_ids: list[int], comparable_type: str) -> int:
+def add_to_pool(
+    db: Session,
+    listing_ids: list[int],
+    comparable_type: str,
+    report_id: uuid.UUID,
+    user_id: int,
+) -> int:
     if not listing_ids:
         return 0
     stmt = (
         pg_insert(ComparablePool)
-        .values([{"listing_id": lid, "comparable_type": comparable_type} for lid in listing_ids])
-        .on_conflict_do_nothing(constraint="uq_pool_listing_type")
+        .values([{
+            "listing_id": lid,
+            "comparable_type": comparable_type,
+            "report_id": report_id,
+            "user_id": user_id,
+        } for lid in listing_ids])
+        .on_conflict_do_nothing(constraint="uq_pool_listing_ctype_report")
     )
     result = db.execute(stmt)
     db.commit()
@@ -77,8 +143,10 @@ def remove_from_pool(db: Session, pool_id: int) -> None:
         db.commit()
 
 
-def clear_pool(db: Session, comparable_type: str | None = None) -> None:
-    q = db.query(ComparablePool)
+def clear_pool(
+    db: Session, report_id: uuid.UUID, comparable_type: str | None = None
+) -> None:
+    q = db.query(ComparablePool).filter(ComparablePool.report_id == report_id)
     if comparable_type:
         q = q.filter_by(comparable_type=comparable_type)
     q.delete()
@@ -91,11 +159,17 @@ def toggle_pin(db: Session, pool_id: int) -> bool:
     if not item:
         return False
     if not item.pinned_for_report:
-        pinned_count = db.query(ComparablePool).filter_by(
-            comparable_type=item.comparable_type, pinned_for_report=True
-        ).count()
+        pinned_count = (
+            db.query(ComparablePool)
+            .filter_by(
+                comparable_type=item.comparable_type,
+                report_id=item.report_id,
+                pinned_for_report=True,
+            )
+            .count()
+        )
         if pinned_count >= MAX_PINNED:
-            return False  # limit reached — caller should inform user
+            return False
     item.pinned_for_report = not item.pinned_for_report
     db.commit()
     return item.pinned_for_report
@@ -113,8 +187,10 @@ def update_pool_adjustment(
 
 # ── Pool query + statistics ───────────────────────────────────────────────────
 
-def get_pool_with_stats(db: Session, comparable_type: str) -> dict:
-    """Returns {items: [...], stats: {...}} for the given comparable type."""
+def get_pool_with_stats(
+    db: Session, comparable_type: str, report_id: uuid.UUID
+) -> dict:
+    """Returns {rows, stats, pinned_count, total_count} for the given report + type."""
     rows = db.execute(text("""
         SELECT
             cp.id AS pool_id,
@@ -143,9 +219,10 @@ def get_pool_with_stats(db: Session, comparable_type: str) -> dict:
         FROM comparable_pool cp
         JOIN listings l ON l.id = cp.listing_id
         WHERE cp.comparable_type = :ctype
+          AND cp.report_id = :rid
           AND l.status = 'active'
         ORDER BY cp.pinned_for_report DESC, cp.added_at DESC
-    """), {"ctype": comparable_type}).mappings().all()
+    """), {"ctype": comparable_type, "rid": str(report_id)}).mappings().all()
 
     items = []
     for r in rows:
@@ -156,12 +233,19 @@ def get_pool_with_stats(db: Session, comparable_type: str) -> dict:
         r["adjustment_pct"] = adj
         items.append(r)
 
-    stats = _compute_stats(db, comparable_type)
+    stats = _compute_stats(db, comparable_type, report_id)
     pinned_count = sum(1 for i in items if i["pinned_for_report"])
-    return {"rows": items, "stats": stats, "pinned_count": pinned_count}
+    return {
+        "rows": items,
+        "stats": stats,
+        "pinned_count": pinned_count,
+        "total_count": len(items),
+    }
 
 
-def _compute_stats(db: Session, comparable_type: str) -> dict | None:
+def _compute_stats(
+    db: Session, comparable_type: str, report_id: uuid.UUID
+) -> dict | None:
     row = db.execute(text("""
         SELECT
             count(*) AS n,
@@ -180,20 +264,21 @@ def _compute_stats(db: Session, comparable_type: str) -> dict | None:
         FROM comparable_pool cp
         JOIN listings l ON l.id = cp.listing_id
         WHERE cp.comparable_type = :ctype
+          AND cp.report_id = :rid
           AND l.status = 'active'
           AND l.price_per_sqm_model IS NOT NULL
-    """), {"ctype": comparable_type}).mappings().first()
+    """), {"ctype": comparable_type, "rid": str(report_id)}).mappings().first()
 
     if not row or not row["n"]:
         return None
     return dict(row)
 
 
-# ── Excel export (reads from pool, pinned-first) ──────────────────────────────
+# ── Excel export ──────────────────────────────────────────────────────────────
 
 _HEADER_FONT = Font(bold=True, color="FFFFFF")
 _HEADER_FILL = PatternFill("solid", fgColor="2563EB")
-_PINNED_FILL = PatternFill("solid", fgColor="DCFCE7")   # light green = pinned
+_PINNED_FILL = PatternFill("solid", fgColor="DCFCE7")
 _SUBJECT_FILL = PatternFill("solid", fgColor="FEF3C7")
 _CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
@@ -220,8 +305,8 @@ def _floor_str(item: dict) -> str:
 
 
 def export_excel(db: Session, report: AppraisalReport) -> io.BytesIO:
-    pool_sale = get_pool_with_stats(db, "sale")
-    pool_rent = get_pool_with_stats(db, "rent")
+    pool_sale = get_pool_with_stats(db, "sale", report.id)
+    pool_rent = get_pool_with_stats(db, "rent", report.id)
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -246,13 +331,14 @@ def export_excel(db: Session, report: AppraisalReport) -> io.BytesIO:
     def _stats_row(ws, stats: dict | None, ncols: int) -> None:
         if not stats:
             return
-        row = ["СТАТИСТИКИ", f"N={stats['n']}",
-               f"Площ: {stats['min_area']}–{stats['max_area']} (ср.{stats['mean_area']})",
-               "", "",
-               f"Цена/кв.м: мин {stats['min_ppsqm']} | ср {stats['mean_ppsqm']} | макс {stats['max_ppsqm']}",
-               f"Q25={stats['p25']} | Медиана={stats['median']} | Q75={stats['p75']}"]
+        row = [
+            "СТАТИСТИКИ", f"N={stats['n']}",
+            f"Площ: {stats['min_area']}–{stats['max_area']} (ср.{stats['mean_area']})",
+            "", "",
+            f"Цена/кв.м: мин {stats['min_ppsqm']} | ср {stats['mean_ppsqm']} | макс {stats['max_ppsqm']}",
+            f"Q25={stats['p25']} | Медиана={stats['median']} | Q75={stats['p75']}",
+        ]
         ws.append((row + [""] * ncols)[:ncols])
-        from openpyxl.styles import PatternFill
         fill = PatternFill("solid", fgColor="EFF6FF")
         for cell in ws[ws.max_row]:
             cell.fill = fill
@@ -265,7 +351,8 @@ def export_excel(db: Session, report: AppraisalReport) -> io.BytesIO:
         for pos, item in enumerate(items, start=1):
             row = ([("✔" if item["pinned_for_report"] else "")] if include_pin_col else []) + [
                 pos,
-                f"{item.get('title_city_model') or ''} {item.get('title_geo_2_model') or ''}\n{item.get('location_raw') or ''}".strip(),
+                f"{item.get('title_city_model') or ''} {item.get('title_geo_2_model') or ''}\n"
+                f"{item.get('location_raw') or ''}".strip(),
                 float(item["area_sqm_model"]) if item.get("area_sqm_model") else "",
                 float(item["total_price"]) if item.get("total_price") else "",
                 float(item["price_per_sqm_model"]) if item.get("price_per_sqm_model") else "",

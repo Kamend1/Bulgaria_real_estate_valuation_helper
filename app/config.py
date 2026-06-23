@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     scrape_max_workers_listings: int = 16
     scrape_delay_seconds: float = 0.8
 
-    app_title: str = "Оценка на недвижими имоти"
+    app_title: str = "Дигитален асистент на имотния оценител"
+
+    secret_key: str = "change-me-in-production-use-long-random-string"
+    admin_email: str = ""  # email that auto-receives admin role on first registration
 
 
 settings = Settings()

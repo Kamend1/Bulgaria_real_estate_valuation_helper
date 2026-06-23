@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}{{ target.username }} — Администрация{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap">
+  <a href="/admin/" class="btn btn-sm btn-secondary">← Всички потребители</a>
+  <h1 style="margin:0">{{ target.username }}</h1>
+  {% if target.role == 'admin' %}<span class="badge badge-admin">Администратор</span>{% endif %}
+  {% if not target.is_active %}<span class="badge badge-warn">Неактивен</span>{% endif %}
+</div>
+
+{% if saved == '1' %}
+<div class="alert alert-success">Промените са запазени.</div>
+{% elif saved == '0' %}
+<div class="alert alert-warn">Не можете да редактирате собствения си акаунт от тук.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">
+
+<!-- ── Профилна информация ─────────────────────────────────────────── -->
+<section class="card">
+  <h2>Профилна информация</h2>
+
+  {% if errors %}
+  <div class="alert alert-error">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>
+  {% endif %}
+
+  <form method="post" action="/admin/users/{{ target.id }}/update">
+    <div class="form-group">
+      <label>Имейл</label>
+      <input type="email" name="email" class="form-control" required value="{{ target.email }}">
+    </div>
+    <div class="form-group">
+      <label>Потребителско ime</label>
+      <input type="text" name="username" class="form-control" required value="{{ target.username }}">
+    </div>
+    <div class="form-group">
+      <label>Пълно ime</label>
+      <input type="text" name="full_name" class="form-control" value="{{ target.full_name or '' }}">
+    </div>
+    <div class="form-group">
+      <label>Регистриран</label>
+      <input type="text" class="form-control" value="{{ target.created_at.strftime('%d.%m.%Y %H:%M') }}" readonly style="background:var(--bg)">
+    </div>
+    <div class="form-group">
+      <label>Последен вход</label>
+      <input type="text" class="form-control" value="{{ target.last_login_at.strftime('%d.%m.%Y %H:%M') if target.last_login_at else '—' }}" readonly style="background:var(--bg)">
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Запази</button>
+  </form>
+</section>
+
+<!-- ── Роля и статус ───────────────────────────────────────────────── -->
+<div>
+  <section class="card" style="margin-bottom:1rem">
+    <h2>Роля</h2>
+    <form method="post" action="/admin/users/{{ target.id }}/set-role" style="display:flex;gap:.5rem;align-items:center">
+      <select name="role" class="form-control" style="flex:1">
+        <option value="user" {{ 'selected' if target.role == 'user' }}>Потребител</option>
+        <option value="admin" {{ 'selected' if target.role == 'admin' }}>Администратор</option>
+      </select>
+      <button type="submit" class="btn btn-secondary btn-sm">Приложи</button>
+    </form>
+  </section>
+
+  <section class="card" style="margin-bottom:1rem">
+    <h2>Статус на акаунта</h2>
+    <p class="hint">Текущ статус: <strong>{{ 'Активен' if target.is_active else 'Неактивен' }}</strong></p>
+    <form method="post" action="/admin/users/{{ target.id }}/toggle-active"
+          onsubmit="return confirm('Промяна на статуса на потребителя?')">
+      <button type="submit" class="btn btn-sm {{ 'btn-danger' if target.is_active else 'btn-primary' }}">
+        {{ 'Деактивирай акаунта' if target.is_active else 'Активирай акаунта' }}
+      </button>
+    </form>
+  </section>
+
+  <section class="card" style="margin-bottom:1rem">
+    <h2>Нулиране на парола</h2>
+    {% if pw_errors %}
+    <div class="alert alert-error">{% for e in pw_errors %}<div>{{ e }}</div>{% endfor %}</div>
+    {% endif %}
+    <form method="post" action="/admin/users/{{ target.id }}/reset-password">
+      <div class="form-group">
+        <label>Нова парола</label>
+        <input type="password" name="new_password" class="form-control" required minlength="8">
+      </div>
+      <div class="form-group">
+        <label>Потвърди паролата</label>
+        <input type="password" name="new_password2" class="form-control" required>
+      </div>
+      <button type="submit" class="btn btn-secondary btn-sm">Задай парола</button>
+    </form>
+  </section>
+
+  <section class="card" style="border-left:3px solid #ef4444">
+    <h2 style="color:#ef4444">Опасна зона</h2>
+    <form method="post" action="/admin/users/{{ target.id }}/delete"
+          onsubmit="return confirm('Изтриване на потребител {{ target.username }}? Действието е необратимо!')">
+      <button type="submit" class="btn btn-danger btn-sm">Изтрий потребителя</button>
+    </form>
+  </section>
+</div>
+
+</div><!-- /grid -->
+
+<!-- ── Съгласия ───────────────────────────────────────────────────── -->
+<section class="card" style="margin-top:1.25rem">
+  <h2>История на съгласията</h2>
+  {% set consent_labels = {'privacy_policy': 'Политика за поверителност', 'terms': 'Общи условия'} %}
+  {% if consents %}
+  <table class="admin-table">
+    <thead>
+      <tr><th>Тип</th><th>Версия</th><th>Дата</th><th>IP</th><th>Статус</th></tr>
+    </thead>
+    <tbody>
+      {% for c in consents %}
+      <tr>
+        <td>{{ consent_labels.get(c.consent_type, c.consent_type) }}</td>
+        <td>{{ c.version }}</td>
+        <td>{{ c.accepted_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td class="muted">{{ c.ip_address or '—' }}</td>
+        <td>
+          {% if c.revoked_at %}
+          <span class="badge badge-warn">Оттеглено {{ c.revoked_at.strftime('%d.%m.%Y') }}</span>
+          {% else %}
+          <span class="badge badge-ok">Активно</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="hint">Няма записани съгласия.</p>
+  {% endif %}
+</section>
+{% endblock %}

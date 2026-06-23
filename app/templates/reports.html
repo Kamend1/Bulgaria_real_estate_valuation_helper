@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Моите доклади — Дигитален асистент на имотния оценител{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
+  <h1>Моите доклади</h1>
+  <form action="/reports/new" method="post">
+    <button class="btn-primary">+ Нов доклад</button>
+  </form>
+</div>
+
+{% if not reports %}
+<div class="empty-state" style="padding:3rem 2rem;text-align:center">
+  <div style="font-size:2.5rem;margin-bottom:0.75rem">📋</div>
+  <p style="font-size:1.05rem;margin-bottom:1rem">Все още нямате доклади.</p>
+  <form action="/reports/new" method="post">
+    <button class="btn-primary">Създай първия си доклад</button>
+  </form>
+</div>
+{% else %}
+
+<div class="reports-table-wrap">
+  <table class="reports-table">
+    <thead>
+      <tr>
+        <th>Заглавие</th>
+        <th>Адрес / Град</th>
+        <th>Дата оценка</th>
+        <th>Обновен</th>
+        <th>Статус</th>
+        <th style="text-align:center">Продажни</th>
+        <th style="text-align:center">Наемни</th>
+        <th style="text-align:center">📌</th>
+        <th>Действия</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in reports %}
+      {% set is_active = (active_report_id == r.id | string) %}
+      <tr class="{{ 'report-row-active' if is_active else '' }}">
+        <td>
+          <span class="report-title">{{ r.title }}</span>
+          {% if is_active %}<span class="badge badge-active">активен</span>{% endif %}
+        </td>
+        <td class="sub-text">
+          {% if r.subject_address %}{{ r.subject_address }}{% endif %}
+          {% if r.subject_city %}<br>{{ r.subject_city }}{% endif %}
+          {% if not r.subject_address and not r.subject_city %}—{% endif %}
+        </td>
+        <td class="sub-text">
+          {{ r.valuation_date.strftime('%d.%m.%Y') if r.valuation_date else '—' }}
+        </td>
+        <td class="sub-text">
+          {{ r.updated_at.strftime('%d.%m.%Y %H:%M') if r.updated_at else '—' }}
+        </td>
+        <td>
+          {% if r.status == 'draft' %}
+            <span class="badge badge-draft">чернова</span>
+          {% elif r.status == 'finalized' %}
+            <span class="badge badge-ok">финализиран</span>
+          {% elif r.status == 'exported' %}
+            <span class="badge badge-exported">експортиран</span>
+          {% else %}
+            <span class="badge">{{ r.status }}</span>
+          {% endif %}
+        </td>
+        <td style="text-align:center">{{ r.sale_count or 0 }}</td>
+        <td style="text-align:center">{{ r.rent_count or 0 }}</td>
+        <td style="text-align:center">{{ r.pinned_count or 0 }}</td>
+        <td>
+          <div class="report-actions">
+            {% if r.status == 'draft' %}
+              <form action="/reports/{{ r.id }}/open" method="post">
+                <button class="btn-primary btn-sm">Отвори</button>
+              </form>
+              <form action="/reports/{{ r.id }}/finalize" method="post">
+                <button class="btn-outline btn-sm">Финализирай</button>
+              </form>
+            {% else %}
+              <form action="/reports/{{ r.id }}/open" method="post">
+                <button class="btn-outline btn-sm">Преглед</button>
+              </form>
+              <form action="/reports/{{ r.id }}/reopen" method="post">
+                <button class="btn-outline btn-sm">Редактирай</button>
+              </form>
+            {% endif %}
+            <form action="/reports/{{ r.id }}/delete" method="post"
+                  onsubmit="return confirm('Изтрий доклад „{{ r.title }}"? Действието е необратимо.')">
+              <button class="btn-remove btn-sm" title="Изтрий доклада">✕</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<p class="hint" style="margin-top:1.5rem">
+  Активният доклад се отваря автоматично в <a href="/comparables/">Сравними</a>.
+  Финализираните доклади могат да бъдат отворени отново за редактиране.
+</p>
+{% endblock %}

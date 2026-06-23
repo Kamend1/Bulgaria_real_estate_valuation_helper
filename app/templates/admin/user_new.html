@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Нов потребител — Администрация{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem">
+  <a href="/admin/" class="btn btn-sm btn-secondary">← Всички потребители</a>
+  <h1 style="margin:0">Нов потребител</h1>
+</div>
+
+<div class="card" style="max-width:560px">
+  {% if errors %}
+  <div class="alert alert-error">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>
+  {% endif %}
+
+  <form method="post" action="/admin/users/new/create">
+    <div class="form-group">
+      <label>Имейл <span class="req">*</span></label>
+      <input type="email" name="email" class="form-control" required value="{{ form.email if form else '' }}">
+    </div>
+    <div class="form-group">
+      <label>Потребителско ime <span class="req">*</span></label>
+      <input type="text" name="username" class="form-control" required value="{{ form.username if form else '' }}">
+    </div>
+    <div class="form-group">
+      <label>Пълно ime</label>
+      <input type="text" name="full_name" class="form-control" value="{{ form.full_name if form else '' }}">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Парола <span class="req">*</span></label>
+        <input type="password" name="password" class="form-control" required minlength="8">
+      </div>
+      <div class="form-group">
+        <label>Потвърди паролата <span class="req">*</span></label>
+        <input type="password" name="password2" class="form-control" required>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Роля</label>
+      <select name="role" class="form-control">
+        <option value="user" {{ 'selected' if not form or form.role == 'user' }}>Потребител</option>
+        <option value="admin" {{ 'selected' if form and form.role == 'admin' }}>Администратор</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Създай потребител</button>
+  </form>
+</div>
+{% endblock %}

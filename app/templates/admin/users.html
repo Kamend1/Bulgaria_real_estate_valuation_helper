@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Потребители — Администрация{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.25rem">
+  <h1 style="margin:0">Потребители</h1>
+  <a href="/admin/users/new/form" class="btn btn-primary">+ Нов потребител</a>
+</div>
+
+{% if request.query_params.get('deleted') %}
+<div class="alert alert-success">Потребителят е изтрит.</div>
+{% endif %}
+
+<form method="get" action="/admin/" class="search-mini" style="margin-bottom:1rem">
+  <input type="text" name="q" value="{{ q }}" placeholder="Търси по имейл, username или ime…" class="form-control" style="max-width:340px;display:inline-block">
+  <button type="submit" class="btn btn-secondary btn-sm">Търси</button>
+  {% if q %}<a href="/admin/" class="btn btn-sm">Изчисти</a>{% endif %}
+</form>
+
+<div class="card" style="padding:0">
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Потребителско ime</th>
+        <th>Имейл</th>
+        <th>Пълно ime</th>
+        <th>Роля</th>
+        <th>Статус</th>
+        <th>Регистриран</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr class="{{ 'row-inactive' if not u.is_active else '' }}">
+        <td class="muted">{{ u.id }}</td>
+        <td><strong>{{ u.username }}</strong></td>
+        <td>{{ u.email }}</td>
+        <td>{{ u.full_name or '—' }}</td>
+        <td>
+          {% if u.role == 'admin' %}
+          <span class="badge badge-admin">Администратор</span>
+          {% else %}
+          <span class="badge">Потребител</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if u.is_active %}
+          <span class="badge badge-ok">Активен</span>
+          {% else %}
+          <span class="badge badge-warn">Неактивен</span>
+          {% endif %}
+        </td>
+        <td class="muted">{{ u.created_at.strftime('%d.%m.%Y') }}</td>
+        <td><a href="/admin/users/{{ u.id }}" class="btn btn-sm btn-secondary">Детайли</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted)">Няма потребители.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="hint" style="margin-top:.5rem">Общо: {{ users | length }} потребителя</div>
+{% endblock %}

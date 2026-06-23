@@ -1,27 +1,121 @@
 {% extends "base.html" %}
-{% block title %}Помощ — Имотен Оценител{% endblock %}
+{% block title %}Помощ — Дигитален асистент на имотния оценител{% endblock %}
 
 {% block content %}
 <h1>Помощ и документация</h1>
 <p class="hint" style="margin-bottom:1.5rem">Обяснение на всички процеси, числа и разлики в системата.</p>
 
+<!-- ═══ Quick Start ═══════════════════════════════════════════════════════════ -->
+<div class="card quickstart-card">
+  <div class="quickstart-title">Бърз старт — 3 стъпки</div>
+  <div class="quickstart-grid">
+    <div class="quickstart-step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <strong>Засичане</strong>
+        <span>/scrape/ → Старт</span>
+        <span class="step-sub">Обновява таксономия и сваля обяви от imot.bg (~6–8 ч. при пълно покритие). Процесът е crash-resumable.</span>
+      </div>
+    </div>
+    <div class="quickstart-step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <strong>Намери обяви</strong>
+        <span>/listings/ → Филтри</span>
+        <span class="step-sub">Избери обяви с checkbox → "+ Добави като сравними". Select-all поддържа до 5 000 наведнъж.</span>
+      </div>
+    </div>
+    <div class="quickstart-step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <strong>Анализирай</strong>
+        <span>/comparables/</span>
+        <span class="step-sub">Пин до 6 обяви · Корекция % · Статистики (мин/медиана/макс) · Excel експорт.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ToC ═══════════════════════════════════════════════════════════════════ -->
 <div class="help-toc">
   <strong>Съдържание</strong>
   <ol>
-    <li><a href="#numbers">Откъде идват числата (и защо се различават)</a></li>
-    <li><a href="#pipeline">Пълен pipeline — от сайта до базата данни</a></li>
-    <li><a href="#scrape">Засичане (Scrape)</a></li>
-    <li><a href="#listings">Обяви и търсене</a></li>
-    <li><a href="#comparables">Сравними и анализ</a></li>
-    <li><a href="#geo">Географски категории</a></li>
-    <li><a href="#feature-eng">Feature Engineering</a></li>
-    <li><a href="#db-schema">Схема на базата данни</a></li>
+    <li><a href="#architecture">⚙️ 0. Архитектура на системата</a></li>
+    <li><a href="#numbers">🔢 1. Откъде идват числата (и защо се различават)</a></li>
+    <li><a href="#scrape">🔄 2. Засичане (Scrape)</a></li>
+    <li><a href="#listings">🔍 3. Обяви и търсене</a></li>
+    <li><a href="#comparables">📊 4. Сравними и анализ</a></li>
+    <li><a href="#geo">🗺️ 5. Географски категории</a></li>
+    <li><a href="#feature-eng">🛠️ 6. Feature Engineering</a></li>
+    <li><a href="#ml">🤖 7. ML модел (LightGBM) — статус</a></li>
+    <li><a href="#db-schema">🗄️ 8. Схема на базата данни</a></li>
+    <li><a href="#faq">❓ 9. Типични въпроси</a></li>
   </ol>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 0. Архитектура ════════════════════════════════════════════════════════ -->
+<section class="help-section" id="architecture">
+  <h2>⚙️ 0. Архитектура на системата</h2>
+
+  <p>Системата се състои от пет последователни стъпки — от imot.bg до PostgreSQL и анализните инструменти.</p>
+
+  <div class="pipeline-steps">
+    <div class="pipeline-step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <strong>Taxonomy (Notebook 01 / автоматично при всяко засичане)</strong>
+        Чете sitemap index-а на imot.bg (~1.9 млн. URL-а), обхожда всички 44 child sitemaps и извлича
+        валидните <code>/obiavi/</code> URL-и. Генерира три CSV файла в <code>data/taxonomy/</code>:
+        <code>valid_deal_types.csv</code>, <code>valid_geo_paths.csv</code> (~5 500 комбинации),
+        <code>valid_property_types.csv</code> (22 типа имот). При стартиране от приложението тази стъпка
+        се извършва автоматично в началото на всяко засичане.
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <strong>Crawl — събиране на URL-и на обяви</strong>
+        За всяка комбинация (тип сделка × географски път × тип имот) системата обхожда страниците
+        с резултати на imot.bg паралелно (8 нишки). Събира URL-ите на всички индивидуални обяви
+        и записва прогреса в checkpoint файл — при прекъсване продължава от последния завършен маршрут.
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <strong>Download + Parse</strong>
+        Всяка обява се изтегля (HTML, Windows-1251 кодиране) и парсва от <code>ad_parsing_utils.py</code>.
+        Извличат се: цена (EUR/BGN), площ, етаж, конструкция, година на строеж, характеристики,
+        описание, локация. HTML файловете се кешират локално в <code>data/raw_listing_html/</code>
+        (наименувани по SHA-256 на URL-а).
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <strong>Feature Engineering</strong>
+        Всеки парснат ред преминава през <code>engineer_features()</code> — нормализация на deal type,
+        парсване на дата, изчисляване на <code>price_per_sqm_model</code>, присвояване на
+        <code>geo_category</code>, корекция на площ при земеделска земя. Вижте
+        <a href="#feature-eng">Секция 6</a> за детайли.
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <strong>PostgreSQL — upsert + snapshot</strong>
+        Обявите се upsert-ват в таблица <code>listings</code> (upsert key: <code>ad_url</code>).
+        Полетата <code>first_seen_at</code> и <code>published_date</code> никога не се презаписват.
+        Всяко засичане добавя нов ред в <code>listing_snapshots</code> — история на цената дори
+        при непроменена стойност. При пълно национално покритие стари обяви се архивират автоматично.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 1. Числата ════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="numbers">
-  <h2>1. Откъде идват числата (и защо се различават)</h2>
+  <h2>🔢 1. Откъде идват числата (и защо се различават)</h2>
 
   <p>В системата има три различни брояча, всеки от които мери различно нещо:</p>
 
@@ -60,8 +154,7 @@
         <td><code>WHERE total_price IS NOT NULL AND price_per_sqm_model IS NOT NULL</code></td>
         <td>
           Обявите, показвани при търсене. Винаги се изисква валидна цена и цена/кв.м —
-          обяви без тях (не е посочена цена или площ) не се показват,
-          защото не са полезни за оценка.
+          обяви без тях не се показват, защото не са полезни за оценка.
         </td>
       </tr>
     </tbody>
@@ -69,62 +162,18 @@
 
   <div class="help-callout">
     <strong>Пример с числата по-горе:</strong><br>
-    164 982 (засичане) − 164 658 (продажби) = <strong>324 обяви</strong> с нераспознат тип сделка (unknown/NULL)<br>
+    164 982 (засичане) − 164 658 (продажби) = <strong>324 обяви</strong> с неразпознат тип сделка<br>
     164 658 (продажби) − 163 439 (търсими) = <strong>1 219 обяви</strong> за продажба без валидна цена или площ
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
-<section class="help-section" id="pipeline">
-  <h2>2. Пълен pipeline — от сайта до базата данни</h2>
-
-  <div class="pipeline-steps">
-    <div class="pipeline-step">
-      <div class="step-num">1</div>
-      <div class="step-body">
-        <strong>Notebook 01 — Taxonomy</strong><br>
-        Чете sitemap-а на imot.bg и генерира три CSV файла в <code>data/taxonomy/</code>:
-        <code>valid_property_types.csv</code> (22 типа имот),
-        <code>valid_geo_paths.csv</code> (хиляди комбинации град/квартал),
-        <code>valid_deal_types.csv</code>.
-      </div>
-    </div>
-    <div class="pipeline-step">
-      <div class="step-num">2</div>
-      <div class="step-body">
-        <strong>Notebook 02 / Засичане — Crawl</strong><br>
-        За всяка комбинация (тип сделка × район × тип имот) обхожда страниците на imot.bg
-        в паралел (24 нишки), събира URL-ите на обявите и сваля HTML-а им.
-        Записва прогреса в CSV файлове — може да се прекъсне и продължи от там.
-      </div>
-    </div>
-    <div class="pipeline-step">
-      <div class="step-num">3</div>
-      <div class="step-body">
-        <strong>Parse → Feature Engineering → DB</strong><br>
-        Всеки HTML файл се парсва от <code>ad_parsing_utils.py</code>.
-        След това <code>engineer_features()</code> изчислява производните полета
-        (нормализирани имена, цена/кв.м, геокатегория и др.).
-        Резултатът се upsert-ва в <code>listings</code> и се добавя snapshot.
-      </div>
-    </div>
-    <div class="pipeline-step">
-      <div class="step-num">4</div>
-      <div class="step-body">
-        <strong>Търсене и анализ</strong><br>
-        Данните са в PostgreSQL. Търсенето прилага филтри директно върху инженерираните полета.
-        Статистиките (median, IQR) се изчисляват с SQL в реално време.
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 2. Засичане ═══════════════════════════════════════════════════════════ -->
 <section class="help-section" id="scrape">
-  <h2>3. Засичане (Scrape)</h2>
+  <h2>🔄 2. Засичане (Scrape)</h2>
 
   <p>Страницата <strong>Засичане</strong> позволява ръчно стартиране на ново засичане на imot.bg.
-  Прогресът се показва в реално време чрез SSE (Server-Sent Events).</p>
+  Прогресът се показва в реално време чрез SSE (Server-Sent Events). Засичането върви като
+  самостоятелен OS процес — независим от уеб сървъра.</p>
 
   <h3>Статуси на засичане</h3>
   <table class="help-table">
@@ -132,37 +181,39 @@
     <tbody>
       <tr><td><code>running</code></td><td>В момента тече</td></tr>
       <tr><td><code>completed</code></td><td>Завършено успешно</td></tr>
+      <tr><td><code>interrupted</code></td><td>Спряно от потребителя или прекъснато</td></tr>
       <tr><td><code>failed</code></td><td>Грешка по време на изпълнение</td></tr>
       <tr><td><code>imported</code></td><td>Данни са наляти от parquet файл (исторически импорт)</td></tr>
     </tbody>
   </table>
 
-  <h3>Колони в историята</h3>
+  <h3>Колони в историята на засичанията</h3>
   <table class="help-table">
     <thead><tr><th>Колона</th><th>Значение</th></tr></thead>
     <tbody>
-      <tr><td>Маршрути</td><td>Завършени / общо комбинации (тип×район×имот)</td></tr>
+      <tr><td>Маршрути</td><td>Завършени / общо комбинации (тип × район × тип имот)</td></tr>
       <tr><td>Обяви</td><td>Уникални URL-и на обяви, открити при засичането</td></tr>
-      <tr><td>Описани</td><td>Обяви, успешно парснати и записани в базата</td></tr>
+      <tr><td>Вписани</td><td>Обяви, успешно парснати и записани в базата данни</td></tr>
     </tbody>
   </table>
 
   <div class="help-callout">
     При ново засичане обявите се <strong>upsert-ват</strong> (не се дублират).
-    Ако обявата съществува, се обновяват цена, дата на последно виждане и др.
-    Всяко засичане добавя нов <em>snapshot</em> — така се следи историята на цените.
+    Ако обявата съществува, се обновяват цена, площ, дата на последно виждане и views.
+    Всяко засичане добавя нов <em>snapshot</em> в <code>listing_snapshots</code> —
+    така се следи историята на цените дори при непроменена стойност.
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 3. Обяви ══════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="listings">
-  <h2>4. Обяви и търсене</h2>
+  <h2>🔍 3. Обяви и търсене</h2>
 
   <p>Страницата <strong>Обяви</strong> показва само обяви с валидна цена <em>и</em> площ
   (<code>total_price IS NOT NULL AND price_per_sqm_model IS NOT NULL</code>).
   Обяви без тези данни са в базата, но не се показват при търсене.</p>
 
-  <h3>Филтри</h3>
+  <h3>Налични филтри</h3>
   <table class="help-table">
     <thead><tr><th>Филтър</th><th>Поле в БД</th><th>Логика</th></tr></thead>
     <tbody>
@@ -170,29 +221,33 @@
       <tr><td>Тип имот</td><td><code>property_type_slug</code></td><td>Taxonomy slug — = ANY(избрани)</td></tr>
       <tr><td>Пазарен сегмент</td><td><code>geo_category</code></td><td>= ANY(избрани категории)</td></tr>
       <tr><td>Населено място</td><td><code>title_city_model</code></td><td>Exact match от нормализирано поле</td></tr>
-      <tr><td>Квартал</td><td><code>location_level_2_model</code></td><td>ILIKE %текст%</td></tr>
-      <tr><td>Цена/Площ/Цена кв.м</td><td>Numeric полета</td><td>&gt;= min и &lt;= max</td></tr>
+      <tr><td>Квартал</td><td><code>location_level_2_model</code></td><td>ILIKE %текст% — динамично по избран град</td></tr>
+      <tr><td>Цена / Площ / Цена кв.м</td><td>Числови полета</td><td>&gt;= мин и &lt;= макс</td></tr>
     </tbody>
   </table>
 
-  <h3>Ценови тренд (▼/▲/=)</h3>
-  <p>Сравнява текущата цена/кв.м с предходния snapshot за същата обява.
+  <h3>Ценови тренд (▼ / ▲ / =)</h3>
+  <p>Сравнява текущата <code>price_per_sqm_model</code> с предходния snapshot за същата обява.
   Ако обявата е нова (само един snapshot) — показва се като "нова".</p>
 
   <h3>Добавяне към сравними</h3>
   <p>Изберете обяви с checkbox → натиснете
-  <strong>"+ Добави като продажни/наемни сравними"</strong>.
-  Обявите отиват в <strong>анализния пул</strong> без лимит.</p>
+  <strong>"+ Добави като продажни / наемни сравними"</strong>.
+  Бутонът <strong>Избери всички</strong> избира до 5 000 обяви, съответстващи на текущите филтри.</p>
+
+  <h3>Детайлна страница</h3>
+  <p>Всяка обява има детайлна страница (<code>/listings/{id}</code>) с пълна информация
+  и таблица с историята на цените — всички snapshots с дата, цена/кв.м и дни на пазара.</p>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 4. Сравними ═══════════════════════════════════════════════════════════ -->
 <section class="help-section" id="comparables">
-  <h2>5. Сравними и анализ</h2>
+  <h2>📊 4. Сравними и анализ</h2>
 
-  <p>Страницата <strong>Сравними</strong> реализира пазарния и доходния подход за оценка.</p>
+  <p>Страницата <strong>Сравними</strong> реализира пазарния и доходния подход за оценка на имоти.</p>
 
   <h3>Анализен пул (без лимит)</h3>
-  <p>Всички добавени обяви са в пула. Статистиките се изчисляват автоматично:</p>
+  <p>Всички добавени обяви са в пула. Статистиките се изчисляват автоматично в реално време:</p>
   <table class="help-table">
     <thead><tr><th>Метрика</th><th>Значение</th></tr></thead>
     <tbody>
@@ -204,26 +259,30 @@
   </table>
 
   <h3>Включване в доклад (📌)</h3>
-  <p>Натиснете <strong>○</strong> до обява → тя се маркира с 📌 и влиза в доклада.
+  <p>Натиснете бутона за pin до обява → тя се маркира в зелено и влиза в доклада.
   Максимум <strong>6 обяви от всеки тип</strong> могат да бъдат пинати
-  (ограничение на таблицата в Word/Excel доклада).</p>
-  <p>Пинатите обяви се оцветяват в зелено и излизат в горната част на таблицата.</p>
+  (ограничение на таблицата в Word/Excel доклада).
+  Пинатите обяви излизат в горната част на таблицата.</p>
 
   <h3>Корекции (%)</h3>
-  <p>За всяка обява може да въведете корекционен процент (напр. <code>-5</code> за по-лошо местоположение).
-  Колоната <em>Кор.ц/кв.м</em> показва: <code>цена/кв.м × (1 + корекция%/100)</code>.</p>
+  <p>За всяка обява може да въведете корекционен процент (напр. <code>-5</code> за по-лошо местоположение
+  или <code>+3</code> за по-добро изложение) и аналитична бележка.
+  Колоната <em>Кор.ц/кв.м</em> показва: <code>цена/кв.м × (1 + корекция% / 100)</code>.</p>
 
   <h3>Excel експорт</h3>
-  <p>Бутонът <strong>⬇ Excel</strong> генерира файл с два листа:
-  <em>Продажни сравними</em> и <em>Наемни сравними</em>.
-  Включва статистиките и всички обяви от пула (пинатите са оцветени в зелено).</p>
+  <p>Бутонът <strong>⬇ Excel</strong> генерира стилизиран <code>.xlsx</code> файл с два worksheet-а:
+  <em>Продажни сравними</em> и <em>Наемни сравними</em>. Включва статистиките,
+  всички обяви от пула (пинатите са оцветени в зелено, оценяваният обект — в жълто)
+  и auto-width на колоните.</p>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 5. Geo ════════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="geo">
-  <h2>6. Географски категории (geo_category)</h2>
+  <h2>🗺️ 5. Географски категории (geo_category)</h2>
 
-  <p>Всяка обява автоматично получава географска категория при feature engineering:</p>
+  <p>Всяка обява автоматично получава географска категория при feature engineering
+  на база йерархично правило по <code>location_level_1/2/3</code> и <code>title_city_model</code>:</p>
+
   <table class="help-table">
     <thead><tr><th>Категория</th><th>Описание</th></tr></thead>
     <tbody>
@@ -240,12 +299,13 @@
   </table>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 6. Feature Engineering ═══════════════════════════════════════════════ -->
 <section class="help-section" id="feature-eng">
-  <h2>7. Feature Engineering</h2>
+  <h2>🛠️ 6. Feature Engineering</h2>
 
   <p>Функцията <code>engineer_features()</code> се извиква за всеки ред преди запис в БД.
-  Трансформациите са:</p>
+  Кодът е в <code>utils/feature_engineering/feature_engineering_utils.py</code>
+  и се споделя между notebooks и приложението.</p>
 
   <table class="help-table">
     <thead><tr><th>Поле</th><th>Логика</th></tr></thead>
@@ -284,37 +344,74 @@
       </tr>
       <tr>
         <td><code>floor_model</code></td>
-        <td>За небuildng типове → NULL; <code>floor_applicability</code> обяснява защо</td>
+        <td>За небuildng типове → NULL; <code>floor_applicability</code> обяснява причината</td>
       </tr>
     </tbody>
   </table>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 7. ML модел ═══════════════════════════════════════════════════════════ -->
+<section class="help-section" id="ml">
+  <h2>🤖 7. ML модел (LightGBM) — статус</h2>
+
+  <p>Системата включва регресионен модел (LightGBM), трениран да предсказва
+  <code>price_per_sqm</code> (цена на квадратен метър в EUR) на база характеристиките на имота.
+  Моделът е разработен в <em>Notebook 04</em> и е базиран на ~165 000 обяви от историческия dataset.</p>
+
+  <h3>Входни характеристики</h3>
+  <table class="help-table">
+    <thead><tr><th>Характеристика</th><th>Поле</th><th>Тип</th></tr></thead>
+    <tbody>
+      <tr><td>Тип имот</td><td><code>property_type_slug</code></td><td>категориен</td></tr>
+      <tr><td>Географска категория</td><td><code>geo_category</code></td><td>категориен</td></tr>
+      <tr><td>Площ</td><td><code>area_sqm_model</code></td><td>числов</td></tr>
+      <tr><td>Етаж</td><td><code>floor_model</code></td><td>числов</td></tr>
+      <tr><td>Тип конструкция</td><td><code>construction_type_model</code></td><td>категориен</td></tr>
+      <tr><td>Година на строеж</td><td><code>construction_year_model</code></td><td>числов</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Методология</h3>
+  <p>Моделът използва sklearn <code>Pipeline</code> с <code>ColumnTransformer</code> за кодиране
+  на категорийните признаци. Хиперпараметрите са избрани чрез <code>GridSearchCV</code>
+  с <code>PredefinedSplit</code> (train/validation разделение без data leakage).
+  Точността се измерва чрез accuracy bands —
+  процентът от обявите, чиято реална цена попада в рамките на ±5%, ±10%, ±15% и ±20%
+  от предсказанията.</p>
+
+  <div class="help-callout">
+    <strong>Текущ статус:</strong> Моделът в момента <em>не е интегриран в приложението</em>.
+    Оценките се базират на пазарен сравнителен анализ (comparable pool), не на ML предсказание.
+    Планирано развитие: автоматично пре-трениране след всяко засичане, SHAP explainability
+    в докладите, API endpoint за директно scoring на нова обява.
+  </div>
+</section>
+
+<!-- ═══ 8. DB схема ════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="db-schema">
-  <h2>8. Схема на базата данни</h2>
+  <h2>🗄️ 8. Схема на базата данни</h2>
 
   <table class="help-table">
     <thead><tr><th>Таблица</th><th>Предназначение</th><th>Ключове</th></tr></thead>
     <tbody>
       <tr>
         <td><code>scrape_runs</code></td>
-        <td>Лог на всяко засичане (и историческия импорт)</td>
+        <td>Лог на всяко засичане (и историческия импорт) с прогрес, статус, PID, heartbeat</td>
         <td>PK: UUID</td>
       </tr>
       <tr>
         <td><code>listings</code></td>
-        <td>Основна таблица — текущо състояние на всяка обява</td>
+        <td>Основна таблица — текущо състояние на всяка обява; статус: active / archived</td>
         <td>PK: BigSerial; UNIQUE: <code>ad_url</code></td>
       </tr>
       <tr>
         <td><code>listing_snapshots</code></td>
-        <td>История на цените — един ред на обява на засичане</td>
+        <td>Append-only ценова история — един ред на обява на засичане</td>
         <td>FK: listing_id, scrape_run_id</td>
       </tr>
       <tr>
         <td><code>comparable_pool</code></td>
-        <td>Анализен пул от обяви (без лимит); <code>pinned_for_report</code> маркира включените в доклада</td>
+        <td>Анализен пул; <code>pinned_for_report</code> маркира включените в доклада (max 6)</td>
         <td>UNIQUE: (listing_id, comparable_type)</td>
       </tr>
       <tr>
@@ -329,12 +426,12 @@
       </tr>
       <tr>
         <td><code>taxonomy_property_types</code></td>
-        <td>22 канонични типа имот от imot.bg sitemap</td>
+        <td>22 канонични типа имот от imot.bg sitemap с Bulgarian display names</td>
         <td>PK: slug</td>
       </tr>
       <tr>
         <td><code>taxonomy_geo_paths</code></td>
-        <td>Маршрутите за засичане (deal_type × geo_path)</td>
+        <td>Маршрутите за засичане (deal_type × geo_path) — синхронизирани при всяко засичане</td>
         <td>PK: (deal_type, geo_path)</td>
       </tr>
     </tbody>
@@ -344,6 +441,92 @@
     <strong>Upsert логика:</strong> при ново засичане <code>first_seen_at</code> и <code>published_date</code>
     никога не се презаписват. Обновяват се само: цена, площ, последно виждане, views, geo_category.
     Всяко засичане добавя нов ред в <code>listing_snapshots</code> — дори ако цената не е променена.
+  </div>
+</section>
+
+<!-- ═══ 9. FAQ ════════════════════════════════════════════════════════════════ -->
+<section class="help-section" id="faq">
+  <h2>❓ 9. Типични въпроси</h2>
+
+  <div class="faq-list">
+
+    <details class="faq-item">
+      <summary>Колко дълго трае едно пълно засичане?</summary>
+      <div class="faq-body">
+        При пълно национално покритие (~5 500 маршрута, ~165 000 обяви) процесът отнема приблизително
+        <strong>6–8 часа</strong>. Препоръчва се да се стартира вечерта и да се остави да приключи
+        за нощта. Процесът е независим от браузъра или уеб сървъра — може да затворите страницата.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Мога ли да прекъсна засичането и да продължа по-късно?</summary>
+      <div class="faq-body">
+        Да. Системата записва checkpoint при всеки завършен маршрут и при всяка изтеглена обява.
+        При натискане на <strong>Спри</strong> или прекъсване на процеса,
+        <strong>Продължи</strong> от историята на засичанията ще подхване от точката на прекъсване.
+        Вече обработените маршрути и обяви не се повтарят.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Защо числата в началната страница, историята и търсенето са различни?</summary>
+      <div class="faq-body">
+        Трите брояча мерят различни неща — вижте <a href="#numbers">Секция 1</a> за пълно обяснение.
+        Накратко: <em>listings_upserted</em> брои всички записани редове включително тези с грешни данни;
+        броят в началната страница изисква разпознат <code>deal_type_normalized</code>;
+        търсачката изисква допълнително валидна цена <em>и</em> площ.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Какво означава "archived" статус на обява?</summary>
+      <div class="faq-body">
+        Обява се архивира автоматично след <strong>пълно</strong> национално засичане
+        (без избрани конкретни региони), ако не е намерена в текущия run.
+        Това означава, че вероятно е свалена от imot.bg.
+        Архивираните обяви не се показват при търсене и не се включват в статистиките.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Мога ли да добавя едни и същи обяви в comparable pool многократно?</summary>
+      <div class="faq-body">
+        Не — таблицата <code>comparable_pool</code> има уникален constraint по
+        <code>(listing_id, comparable_type)</code>. При опит за дублиране добавянето
+        се игнорира без грешка.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>До колко обяви мога да пинна за доклад?</summary>
+      <div class="faq-body">
+        До <strong>6 обяви от всеки тип</strong> (продажни / наемни). Ограничението произтича
+        от формата на таблицата в Word/Excel доклада. Броят обяви в анализния пул (без pin)
+        е неограничен — статистиките се изчисляват върху всички.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Цената/кв.м в приложението съответства ли на посочената на imot.bg?</summary>
+      <div class="faq-body">
+        Не задължително. <code>price_per_sqm_model</code> се изчислява от системата като
+        <code>total_price / area_sqm_model</code> — преизчислена стойност, не изтеглена от сайта.
+        За земеделска земя площта се конвертира от декари в кв.м преди деленето.
+        Така се гарантира консистентност между всички обяви.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Има ли вградена ML оценка на имот?</summary>
+      <div class="faq-body">
+        В момента — не. Оценките се базират изцяло на сравнителен пазарен анализ (comparable pool).
+        Системата включва обучен LightGBM модел (вижте <a href="#ml">Секция 7</a>),
+        но той все още не е интегриран в уеб интерфейса.
+        Интеграцията е планирана за следваща фаза на развитие.
+      </div>
+    </details>
+
   </div>
 </section>
 

@@ -2,13 +2,17 @@ import logging
 import traceback
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
+from app.db.models import User
 from app.db.session import get_db, db_session
-from app.routers import comparables, listings, scrape
+from app.routers import comparables, listings, reports, scrape
+from app.routers import auth as auth_router
+from app.routers import admin as admin_router
 from app.templating import templates
 
 logging.basicConfig(
@@ -20,6 +24,30 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title=settings.app_title)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.middleware("http")
+async def attach_current_user(request: Request, call_next):
+    """Load the authenticated user into request.state.user for all templates."""
+    request.state.user = None
+    if not request.url.path.startswith("/static"):
+        try:
+            uid = request.session.get("user_id")
+            if uid:
+                with db_session() as db:
+                    u = db.get(User, int(uid))
+                    if u and u.is_active:
+                        db.expunge(u)   # detach before commit so attrs stay loaded
+                        request.state.user = u
+        except Exception:
+            pass
+    return await call_next(request)
+
+
+# SessionMiddleware must be outermost — registered AFTER attach_current_user
+# so Starlette places it first in the request chain and populates request.session
+# before attach_current_user reads it.
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=86400 * 7)
 
 
 @app.on_event("startup")
@@ -35,9 +63,21 @@ async def startup_cleanup() -> None:
     except Exception:
         logger.exception("Startup cleanup failed (non-fatal)")
 
+app.include_router(auth_router.router)
+app.include_router(admin_router.router)
 app.include_router(scrape.router)
 app.include_router(listings.router)
 app.include_router(comparables.router)
+app.include_router(reports.router)
+
+
+@app.exception_handler(401)
+async def auth_required_redirect(request: Request, exc):
+    """Redirect unauthenticated users to login; return 401 for HTMX/XHR."""
+    if request.headers.get("HX-Request") or request.headers.get("X-Requested-With"):
+        return HTMLResponse("Необходима е идентификация", status_code=401)
+    next_url = str(request.url.path)
+    return RedirectResponse(url=f"/auth/login?next={next_url}", status_code=302)
 
 
 @app.exception_handler(Exception)
@@ -60,6 +100,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/help", response_class=HTMLResponse)
 async def help_page(request: Request):
     return templates.TemplateResponse(request, "help.html", {})
+
+
+@app.get("/legal/privacy-policy", response_class=HTMLResponse)
+async def privacy_policy(request: Request):
+    return templates.TemplateResponse(request, "legal/privacy_policy.html", {})
+
+
+@app.get("/legal/terms", response_class=HTMLResponse)
+async def terms(request: Request):
+    return templates.TemplateResponse(request, "legal/terms.html", {})
 
 
 @app.get("/", response_class=HTMLResponse)

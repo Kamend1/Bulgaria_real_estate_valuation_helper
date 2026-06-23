@@ -2,13 +2,26 @@
 {% block title %}Сравними — {{ report.title }}{% endblock %}
 
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-  <h1>Сравними — {{ report.title }}</h1>
-  <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem">
+  <div>
+    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.15rem">
+      <a href="/reports/" style="color:var(--muted);text-decoration:none">← Всички доклади</a>
+      {% if report.status == 'finalized' %}
+        &nbsp;·&nbsp;<span class="badge badge-ok" style="font-size:0.7rem">финализиран</span>
+      {% endif %}
+    </div>
+    <h1 style="margin:0">{{ report.title }}</h1>
+  </div>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
     <a href="/comparables/export/excel" class="btn-primary">⬇ Excel</a>
+    {% if report.status == 'draft' %}
+    <form action="/reports/{{ report.id }}/finalize" method="post" style="display:inline">
+      <button class="btn-outline">Финализирай</button>
+    </form>
+    {% endif %}
     <form action="/comparables/new-report" method="post" style="display:inline">
       <button class="btn-danger"
-              onclick="return confirm('Нов доклад? Анализният пул ще се изчисти.')">
+              onclick="return confirm('Нов доклад? Текущият ще се запази в „Доклади".')">
         ✚ Нов доклад
       </button>
     </form>
@@ -71,17 +84,38 @@
   <input type="radio" id="tab-sale" name="tab" checked>
   <label for="tab-sale">
     Продажни сравними
-    <span class="tab-count">{{ pool_sale.rows | length }}</span>
+    <span class="tab-count">{{ pool_sale.total_count }}</span>
   </label>
 
   <input type="radio" id="tab-rent" name="tab">
   <label for="tab-rent">
     Наемни сравними
-    <span class="tab-count">{{ pool_rent.rows | length }}</span>
+    <span class="tab-count">{{ pool_rent.total_count }}</span>
   </label>
 
   <!-- SALE TAB -->
   <div class="tab-content" id="tab-content-sale">
+    <div class="pool-filter-bar" id="pool-filter-sale">
+      <input type="text" class="f-loc" id="f-loc-sale" placeholder="🔍 Местоположение" oninput="filterPool('sale')">
+      <div class="filter-range-group">
+        <span class="filter-label">Площ</span>
+        <input type="number" class="f-num" id="f-amin-sale" placeholder="от" min="0" oninput="filterPool('sale')">
+        <span>–</span>
+        <input type="number" class="f-num" id="f-amax-sale" placeholder="до" min="0" oninput="filterPool('sale')">
+      </div>
+      <div class="filter-range-group">
+        <span class="filter-label">EUR/кв.м</span>
+        <input type="number" class="f-num" id="f-pmin-sale" placeholder="от" min="0" oninput="filterPool('sale')">
+        <span>–</span>
+        <input type="number" class="f-num" id="f-pmax-sale" placeholder="до" min="0" oninput="filterPool('sale')">
+      </div>
+      <input type="text" class="f-con" id="f-con-sale" placeholder="Строит." oninput="filterPool('sale')">
+      <label class="filter-check-label">
+        <input type="checkbox" id="f-pin-sale" onchange="filterPool('sale')"> Само 📌
+      </label>
+      <button onclick="clearFilter('sale')" class="btn-clear btn-sm">✕ Нулирай</button>
+      <span class="filter-count" id="f-cnt-sale"></span>
+    </div>
     {% set pool = pool_sale %}
     {% set ctype = 'sale' %}
     {% set ppsqm_label = 'EUR/кв.м' %}
@@ -90,6 +124,27 @@
 
   <!-- RENT TAB -->
   <div class="tab-content" id="tab-content-rent">
+    <div class="pool-filter-bar" id="pool-filter-rent">
+      <input type="text" class="f-loc" id="f-loc-rent" placeholder="🔍 Местоположение" oninput="filterPool('rent')">
+      <div class="filter-range-group">
+        <span class="filter-label">Площ</span>
+        <input type="number" class="f-num" id="f-amin-rent" placeholder="от" min="0" oninput="filterPool('rent')">
+        <span>–</span>
+        <input type="number" class="f-num" id="f-amax-rent" placeholder="до" min="0" oninput="filterPool('rent')">
+      </div>
+      <div class="filter-range-group">
+        <span class="filter-label">EUR/кв.м</span>
+        <input type="number" class="f-num" id="f-pmin-rent" placeholder="от" min="0" oninput="filterPool('rent')">
+        <span>–</span>
+        <input type="number" class="f-num" id="f-pmax-rent" placeholder="до" min="0" oninput="filterPool('rent')">
+      </div>
+      <input type="text" class="f-con" id="f-con-rent" placeholder="Строит." oninput="filterPool('rent')">
+      <label class="filter-check-label">
+        <input type="checkbox" id="f-pin-rent" onchange="filterPool('rent')"> Само 📌
+      </label>
+      <button onclick="clearFilter('rent')" class="btn-clear btn-sm">✕ Нулирай</button>
+      <span class="filter-count" id="f-cnt-rent"></span>
+    </div>
     {% set pool = pool_rent %}
     {% set ctype = 'rent' %}
     {% set ppsqm_label = 'EUR/кв.м/мес' %}
@@ -103,4 +158,146 @@
 </p>
 
 {% include "comparables/_income_analysis.html" %}
+
+{% include "comparables/_residual_analysis.html" %}
+
+<script>
+(function () {
+  /* ── Tab persistence ──────────────────────────────────────────── */
+  var TAB_KEY = 'comp-active-tab';
+  var tabs = document.querySelectorAll('input[name="tab"]');
+  var savedTab = localStorage.getItem(TAB_KEY);
+  if (savedTab) { var el = document.getElementById(savedTab); if (el) el.checked = true; }
+  tabs.forEach(function(t) {
+    t.addEventListener('change', function() { localStorage.setItem(TAB_KEY, t.id); });
+  });
+
+  /* ── Pool filter + pagination ─────────────────────────────────── */
+  var PAGE_SIZE = 250;
+  var poolPage = { sale: 1, rent: 1 };
+
+  function getRows(ctype) {
+    return Array.from(document.querySelectorAll('#pool-table-' + ctype + ' tbody tr'));
+  }
+  function getVisibleRows(ctype) {
+    return getRows(ctype).filter(function(r) { return !r.classList.contains('pool-row-hidden'); });
+  }
+
+  window.filterPool = function(ctype) {
+    var loc  = (document.getElementById('f-loc-'  + ctype) || {}).value || '';
+    var aMin = parseFloat((document.getElementById('f-amin-' + ctype) || {}).value) || 0;
+    var aMax = parseFloat((document.getElementById('f-amax-' + ctype) || {}).value) || Infinity;
+    var pMin = parseFloat((document.getElementById('f-pmin-' + ctype) || {}).value) || 0;
+    var pMax = parseFloat((document.getElementById('f-pmax-' + ctype) || {}).value) || Infinity;
+    var con  = (document.getElementById('f-con-'  + ctype) || {}).value || '';
+    var pin  = !!(document.getElementById('f-pin-' + ctype) || {}).checked;
+    loc = loc.toLowerCase();
+    con = con.toLowerCase();
+
+    var all = getRows(ctype);
+    all.forEach(function(r) {
+      var pass = true;
+      if (loc && !(r.dataset.loc || '').includes(loc))  pass = false;
+      if (con && !(r.dataset.con || '').includes(con))  pass = false;
+      if (pin && r.dataset.pinned !== 'true')            pass = false;
+      var a = +(r.dataset.area || 0);
+      var p = +(r.dataset.pps  || 0);
+      if (aMin > 0 && a < aMin)                          pass = false;
+      if (aMax < Infinity && a > aMax)                   pass = false;
+      if (pMin > 0 && p < pMin)                          pass = false;
+      if (pMax < Infinity && p > pMax)                   pass = false;
+      r.classList.toggle('pool-row-hidden', !pass);
+    });
+
+    poolPage[ctype] = 1;
+    paginatePool(ctype);
+  };
+
+  window.clearFilter = function(ctype) {
+    ['f-loc-','f-amin-','f-amax-','f-pmin-','f-pmax-','f-con-'].forEach(function(p) {
+      var el = document.getElementById(p + ctype);
+      if (el) el.value = '';
+    });
+    var pin = document.getElementById('f-pin-' + ctype);
+    if (pin) pin.checked = false;
+    window.filterPool(ctype);
+  };
+
+  window.goPage = function(ctype, pg) {
+    poolPage[ctype] = pg;
+    paginatePool(ctype);
+  };
+
+  function paginatePool(ctype) {
+    var visible = getVisibleRows(ctype);
+    var allRows = getRows(ctype);
+    var total   = visible.length;
+    var pages   = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    var page    = Math.min(poolPage[ctype] || 1, pages);
+    poolPage[ctype] = page;
+
+    var start = (page - 1) * PAGE_SIZE;
+    var end   = start + PAGE_SIZE;
+
+    visible.forEach(function(r, i) {
+      r.classList.toggle('pool-row-paged', i < start || i >= end);
+    });
+
+    /* count label in filter bar (outside panel, survives HTMX swap) */
+    var cnt = document.getElementById('f-cnt-' + ctype);
+    if (cnt) {
+      cnt.textContent = total < allRows.length
+        ? (total + ' / ' + allRows.length + ' обяви')
+        : (total + ' обяви');
+    }
+
+    renderPagination(ctype, page, pages, total, start + 1, Math.min(end, total));
+  }
+
+  function pagBtn(label, ctype, pg, disabled, active) {
+    var cls = 'pag-btn' + (active ? ' pag-active' : '');
+    var dis = disabled ? ' disabled' : '';
+    return '<button class="' + cls + '"' + dis +
+           ' onclick="goPage(\'' + ctype + '\',' + pg + ')">' + label + '</button>';
+  }
+
+  function renderPagination(ctype, page, pages, total, from, to) {
+    var el = document.getElementById('pool-pag-' + ctype);
+    if (!el) return;
+    if (total === 0) {
+      el.innerHTML = '<span class="pag-info">Няма резултати за текущите филтри</span>';
+      return;
+    }
+    var html = '<span class="pag-info">Показват се <strong>' + from + '–' + to +
+               '</strong> от <strong>' + total + '</strong></span>';
+    if (pages > 1) {
+      html += '<div class="pag-btns">';
+      html += pagBtn('‹', ctype, page - 1, page <= 1, false);
+      var lo = Math.max(1, Math.min(page - 2, pages - 4));
+      var hi = Math.min(pages, lo + 4);
+      for (var p = lo; p <= hi; p++) {
+        html += pagBtn(p, ctype, p, false, p === page);
+      }
+      html += pagBtn('›', ctype, page + 1, page >= pages, false);
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  window.initPool = function(ctype) {
+    /* Called on DOMContentLoaded and after every HTMX pool-panel swap.
+       Filter bar is outside the swapped element, so current filter values are preserved. */
+    getRows(ctype).forEach(function(r) {
+      r.classList.remove('pool-row-hidden', 'pool-row-paged');
+    });
+    poolPage[ctype] = 1;
+    window.filterPool(ctype);
+  };
+
+  document.addEventListener('DOMContentLoaded', function() {
+    window.initPool('sale');
+    window.initPool('rent');
+  });
+}());
+</script>
 {% endblock %}

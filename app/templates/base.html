@@ -3,37 +3,109 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Оценка на недвижими имоти{% endblock %}</title>
+  <title>{% block title %}Дигитален асистент на имотния оценител{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   {% block extra_css %}{% endblock %}
   <script>
-    // Set --navbar-h from actual rendered height so calc(100vh - var(--navbar-h)) is exact
     document.addEventListener('DOMContentLoaded', function() {
-      const h = document.querySelector('.navbar').offsetHeight;
+      const strip = document.querySelector('.brand-strip');
+      const nav   = document.querySelector('.navbar');
+      const h = (strip ? strip.offsetHeight : 0) + (nav ? nav.offsetHeight : 0);
       document.documentElement.style.setProperty('--navbar-h', h + 'px');
     });
   </script>
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
+
+  <div class="brand-strip">
+    <div>
+      <a class="brand-strip-name" href="https://www.ksbanalytica.com" target="_blank" rel="noopener">KSB Analytica</a>
+      <span class="brand-strip-tagline">— Innovative Solutions</span>
+    </div>
+    <nav class="brand-strip-links">
+      <a href="https://www.ksbanalytica.com/about-us" target="_blank" rel="noopener">За нас</a>
+      <a href="https://www.ksbanalytica.com/appraisal-services" target="_blank" rel="noopener">Оценителски услуги</a>
+      <a href="https://www.ksbanalytica.com/contact-us" target="_blank" rel="noopener">Контакти</a>
+      <a class="brand-strip-linkedin" href="https://www.linkedin.com/company/ksb-analytica" target="_blank" rel="noopener">LinkedIn ↗</a>
+    </nav>
+  </div>
+
   <nav class="navbar">
-    <a class="brand" href="/">Имотен Оценител</a>
+    <a class="brand" href="/">
+      Дигитален асистент на имотния оценител
+      <span class="brand-sub">от KSB Analytica</span>
+    </a>
     <ul class="nav-links">
       <li><a href="/" {% if request.url.path == '/' %}class="nav-active"{% endif %}>Начало</a></li>
       <li><a href="/listings/" {% if request.url.path.startswith('/listings') %}class="nav-active"{% endif %}>Обяви</a></li>
       <li><a href="/comparables/" {% if request.url.path.startswith('/comparables') %}class="nav-active"{% endif %}>Сравними</a></li>
       <li><a href="/scrape/" {% if request.url.path.startswith('/scrape') %}class="nav-active"{% endif %}>Засичане</a></li>
-      <li><a href="#" class="nav-disabled">Доклади</a></li>
+      <li><a href="/reports/" {% if request.url.path.startswith('/reports') %}class="nav-active"{% endif %}>Доклади</a></li>
       <li><a href="/help" {% if request.url.path.startswith('/help') %}class="nav-active"{% endif %}>Помощ</a></li>
     </ul>
+    <div class="nav-auth">
+      {% if request.state.user %}
+        {% if request.state.user.role == 'admin' %}
+        <a href="/admin/" class="nav-auth-link nav-auth-admin {% if request.url.path.startswith('/admin') %}nav-active{% endif %}">Администрация</a>
+        {% endif %}
+        <a href="/auth/profile" class="nav-auth-link {% if request.url.path.startswith('/auth/profile') %}nav-active{% endif %}">
+          {{ request.state.user.username }}
+        </a>
+        <form method="post" action="/auth/logout" style="margin:0">
+          <button type="submit" class="btn-logout">Изход</button>
+        </form>
+      {% else %}
+        <a href="/auth/login" class="nav-auth-link {% if request.url.path.startswith('/auth/login') %}nav-active{% endif %}">Вход</a>
+        <a href="/auth/register" class="btn-register {% if request.url.path.startswith('/auth/register') %}nav-active{% endif %}">Регистрация</a>
+      {% endif %}
+    </div>
   </nav>
 
   <main class="container">
     {% block content %}{% endblock %}
   </main>
 
-  <footer>
-    <p>Лична оценителска база данни &mdash; imot.bg</p>
+  <footer class="site-footer">
+    <div class="footer-main">
+      <div class="footer-col footer-brand-col">
+        <div class="footer-brand-name">KSB Analytica</div>
+        <div class="footer-tagline">Expert Corporate Finance, Risk Management, and Business Loan Advisory for SMEs.</div>
+        <a class="footer-linkedin" href="https://www.linkedin.com/company/ksb-analytica" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </div>
+      <div class="footer-col">
+        <div class="footer-col-title">Приложение</div>
+        <ul class="footer-links">
+          <li><a href="/">Начало</a></li>
+          <li><a href="/listings/">Обяви</a></li>
+          <li><a href="/comparables/">Сравними</a></li>
+          <li><a href="/scrape/">Засичане</a></li>
+          <li><a href="/help">Помощ</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <div class="footer-col-title">KSB Analytica</div>
+        <ul class="footer-links">
+          <li><a href="https://www.ksbanalytica.com/about-us" target="_blank" rel="noopener">За нас</a></li>
+          <li><a href="https://www.ksbanalytica.com/services" target="_blank" rel="noopener">Услуги</a></li>
+          <li><a href="https://www.ksbanalytica.com/appraisal-services" target="_blank" rel="noopener">Оценителски услуги</a></li>
+          <li><a href="https://www.ksbanalytica.com/service-packages" target="_blank" rel="noopener">Пакети услуги</a></li>
+          <li><a href="https://www.ksbanalytica.com/contact-us" target="_blank" rel="noopener">Контакти</a></li>
+        </ul>
+        <a class="footer-website-btn" href="https://www.ksbanalytica.com" target="_blank" rel="noopener">ksbanalytica.com ↗</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 KSB Analytica. All rights reserved.</span>
+      <span class="footer-legal">
+        <a href="https://www.ksbanalytica.com/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>
+        ·
+        <a href="https://www.ksbanalytica.com/terms-and-conditions" target="_blank" rel="noopener">Terms and Conditions</a>
+        ·
+        <a href="https://www.ksbanalytica.com/cookie-policy" target="_blank" rel="noopener">Cookie Policy</a>
+      </span>
+    </div>
   </footer>
+
 </body>
 </html>
