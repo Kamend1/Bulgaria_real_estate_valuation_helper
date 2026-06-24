@@ -5,7 +5,7 @@
 ![LightGBM](https://img.shields.io/badge/LightGBM-4.5-blue?logo=lightgbm&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-red)
 
 Проект за machine learning анализ и оценка на пазарната стойност на жилищни имоти в България. Данните се набавят чрез автоматично събиране от imot.bg, обработват се с feature engineering pipeline и се подават на регресионен модел (LightGBM), предсказващ цена на квадратен метър. Резултатите се достъпват чрез FastAPI уеб приложение за оценки и сравнителен анализ.
 
@@ -368,6 +368,6 @@ uvicorn app.main:app --reload
 
 ---
 
-## Лиценз
+## License
 
-[LICENSE](LICENSE)
+This project is proprietary software. All rights reserved. No use, copying, modification, distribution, or commercial exploitation is permitted without prior written permission.
