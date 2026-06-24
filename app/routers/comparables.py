@@ -1,6 +1,8 @@
 import uuid
 from datetime import date
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -16,6 +18,7 @@ from app.services.comparable_service import (
     delete_user_report,
     export_excel,
     finalize_user_report,
+    generate_docx,
     get_or_create_draft,
     get_pool_with_stats,
     get_report_for_user,
@@ -23,7 +26,9 @@ from app.services.comparable_service import (
     new_draft,
     remove_from_pool,
     toggle_pin,
+    update_income_approach,
     update_pool_adjustment,
+    update_residual_approach,
     update_subject,
 )
 
@@ -235,6 +240,41 @@ async def new_report_endpoint(
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
+@router.post("/save-income")
+async def save_income_approach(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    rent_per_sqm_month: str = Form(""),
+    cap_rate_pct: str = Form(""),
+    concluded_per_sqm: str = Form(""),
+    subject_area_sqm: str = Form(""),
+):
+    def _f(v): return float(v) if v.strip() else None
+    report = _active_report(request, db, user)
+    update_income_approach(
+        db, report.id,
+        rent_per_sqm_month=_f(rent_per_sqm_month),
+        cap_rate_pct=_f(cap_rate_pct),
+        concluded_per_sqm=_f(concluded_per_sqm),
+        subject_area_sqm=_f(subject_area_sqm),
+    )
+    return RedirectResponse(url="/comparables/#income-panel", status_code=303)
+
+
+@router.post("/save-residual")
+async def save_residual_approach(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    concluded_value_residual: str = Form(""),
+):
+    def _f(v): return float(v) if v.strip() else None
+    report = _active_report(request, db, user)
+    update_residual_approach(db, report.id, concluded_value_residual=_f(concluded_value_residual))
+    return RedirectResponse(url="/comparables/#residual-panel", status_code=303)
+
+
 @router.get("/export/excel")
 async def export_excel_download(
     request: Request,
@@ -247,4 +287,21 @@ async def export_excel_download(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename*=UTF-8''sravnimi.xlsx"},
+    )
+
+
+@router.get("/export/docx")
+async def export_docx_download(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    report = _active_report(request, db, user)
+    buf = generate_docx(db, report)
+    safe_title = (report.title or "ocenka").replace(" ", "_")[:40]
+    encoded = quote(safe_title, safe="")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}.docx"},
     )

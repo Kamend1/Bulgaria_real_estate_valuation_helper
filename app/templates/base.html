@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Дигитален асистент на имотния оценител{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
   {% block extra_css %}{% endblock %}
   <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -19,22 +20,30 @@
 <body class="{% block body_class %}{% endblock %}">
 
   <div class="brand-strip">
-    <div>
+    <div class="brand-strip-left">
+      <img src="/static/logo.png" class="brand-strip-logo" alt="KSB Analytica">
       <a class="brand-strip-name" href="https://www.ksbanalytica.com" target="_blank" rel="noopener">KSB Analytica</a>
-      <span class="brand-strip-tagline">— Innovative Solutions</span>
+      <span class="brand-strip-sep">|</span>
+      <span class="brand-strip-tagline">Innovative Solutions</span>
     </div>
     <nav class="brand-strip-links">
       <a href="https://www.ksbanalytica.com/about-us" target="_blank" rel="noopener">За нас</a>
       <a href="https://www.ksbanalytica.com/appraisal-services" target="_blank" rel="noopener">Оценителски услуги</a>
       <a href="https://www.ksbanalytica.com/contact-us" target="_blank" rel="noopener">Контакти</a>
-      <a class="brand-strip-linkedin" href="https://www.linkedin.com/company/ksb-analytica" target="_blank" rel="noopener">LinkedIn ↗</a>
+      <a class="brand-strip-linkedin" href="https://www.linkedin.com/company/ksb-analytica" target="_blank" rel="noopener">
+        <svg class="nav-li-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M16.338 16.338H13.67v-4.177c0-.996-.017-2.278-1.387-2.278-1.389 0-1.601 1.084-1.601 2.205v4.25H8.014V8.006h2.559v1.17h.035c.357-.674 1.227-1.387 2.526-1.387 2.703 0 3.203 1.779 3.203 4.092v4.457zM5.005 6.835a1.542 1.542 0 110-3.085 1.542 1.542 0 010 3.085zm1.337 9.503H3.667V8.006h2.675v8.332zM17.668 1H2.328C1.595 1 1 1.581 1 2.298v15.403C1 18.418 1.595 19 2.328 19h15.34C18.406 19 19 18.418 19 17.701V2.298C19 1.581 18.406 1 17.668 1z"/></svg>
+        LinkedIn ↗
+      </a>
     </nav>
   </div>
 
   <nav class="navbar">
     <a class="brand" href="/">
-      Дигитален асистент на имотния оценител
-      <span class="brand-sub">от KSB Analytica</span>
+      <img src="/static/logo.png" class="nav-logo-icon" alt="KSB Analytica">
+      <span class="brand-text">
+        Дигитален асистент
+        <span class="brand-sub">KSB Analytica · Имотна оценка</span>
+      </span>
     </a>
     <ul class="nav-links">
       <li><a href="/" {% if request.url.path == '/' %}class="nav-active"{% endif %}>Начало</a></li>
@@ -42,6 +51,7 @@
       <li><a href="/comparables/" {% if request.url.path.startswith('/comparables') %}class="nav-active"{% endif %}>Сравними</a></li>
       <li><a href="/scrape/" {% if request.url.path.startswith('/scrape') %}class="nav-active"{% endif %}>Засичане</a></li>
       <li><a href="/reports/" {% if request.url.path.startswith('/reports') %}class="nav-active"{% endif %}>Доклади</a></li>
+      <li><a href="/analytics/" {% if request.url.path.startswith('/analytics') %}class="nav-active"{% endif %}>Статистики</a></li>
       <li><a href="/help" {% if request.url.path.startswith('/help') %}class="nav-active"{% endif %}>Помощ</a></li>
     </ul>
     <div class="nav-auth">
@@ -50,9 +60,10 @@
         <a href="/admin/" class="nav-auth-link nav-auth-admin {% if request.url.path.startswith('/admin') %}nav-active{% endif %}">Администрация</a>
         {% endif %}
         <a href="/auth/profile" class="nav-auth-link {% if request.url.path.startswith('/auth/profile') %}nav-active{% endif %}">
+          <svg class="nav-user-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
           {{ request.state.user.username }}
         </a>
-        <form method="post" action="/auth/logout" style="margin:0">
+        <form method="post" action="/auth/logout" class="form-no-margin">
           <button type="submit" class="btn-logout">Изход</button>
         </form>
       {% else %}
@@ -66,13 +77,25 @@
     {% block content %}{% endblock %}
   </main>
 
+  {% block extra_js %}{% endblock %}
+
   <footer class="site-footer">
     <div class="footer-main">
+
+      <!-- Brand column -->
       <div class="footer-col footer-brand-col">
-        <div class="footer-brand-name">KSB Analytica</div>
-        <div class="footer-tagline">Expert Corporate Finance, Risk Management, and Business Loan Advisory for SMEs.</div>
-        <a class="footer-linkedin" href="https://www.linkedin.com/company/ksb-analytica" target="_blank" rel="noopener">LinkedIn ↗</a>
+        <a class="footer-brand-lockup" href="https://www.ksbanalytica.com" target="_blank" rel="noopener">
+          <img src="/static/logo.png" class="footer-logo-icon" alt="KSB Analytica">
+          <span class="footer-brand-name">KSB Analytica</span>
+        </a>
+        <p class="footer-tagline">Expert Corporate Finance, Risk Management &amp; Real Estate Appraisal for SMEs.</p>
+        <a class="footer-linkedin" href="https://www.linkedin.com/company/ksb-analytica" target="_blank" rel="noopener">
+          <svg viewBox="0 0 20 20" fill="currentColor" class="footer-li-icon" aria-hidden="true"><path d="M16.338 16.338H13.67v-4.177c0-.996-.017-2.278-1.387-2.278-1.389 0-1.601 1.084-1.601 2.205v4.25H8.014V8.006h2.559v1.17h.035c.357-.674 1.227-1.387 2.526-1.387 2.703 0 3.203 1.779 3.203 4.092v4.457zM5.005 6.835a1.542 1.542 0 110-3.085 1.542 1.542 0 010 3.085zm1.337 9.503H3.667V8.006h2.675v8.332zM17.668 1H2.328C1.595 1 1 1.581 1 2.298v15.403C1 18.418 1.595 19 2.328 19h15.34C18.406 19 19 18.418 19 17.701V2.298C19 1.581 18.406 1 17.668 1z"/></svg>
+          LinkedIn
+        </a>
       </div>
+
+      <!-- App links -->
       <div class="footer-col">
         <div class="footer-col-title">Приложение</div>
         <ul class="footer-links">
@@ -80,9 +103,12 @@
           <li><a href="/listings/">Обяви</a></li>
           <li><a href="/comparables/">Сравними</a></li>
           <li><a href="/scrape/">Засичане</a></li>
+          <li><a href="/reports/">Доклади</a></li>
           <li><a href="/help">Помощ</a></li>
         </ul>
       </div>
+
+      <!-- External links -->
       <div class="footer-col">
         <div class="footer-col-title">KSB Analytica</div>
         <ul class="footer-links">
@@ -95,13 +121,28 @@
         <a class="footer-website-btn" href="https://www.ksbanalytica.com" target="_blank" rel="noopener">ksbanalytica.com ↗</a>
       </div>
     </div>
+
+    <!-- КНОБ legal notice -->
+    <div class="footer-knob">
+      <svg class="footer-knob-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M10 1.5L2.5 5v5.5C2.5 14.642 5.86 18.38 10 19.5c4.14-1.12 7.5-4.858 7.5-9V5L10 1.5zm0 2.236l5.5 2.5V10.5c0 3.282-2.519 6.38-5.5 7.462C7.019 16.88 4.5 13.782 4.5 10.5V6.236L10 3.736z" clip-rule="evenodd"/>
+        <path d="M9 9.5l1.5 1.5L13 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <p>
+        КСБ Аналитика е вписана със сертификат <strong>№&nbsp;900200284</strong> в Регистъра на
+        Камарата на независимите оценители в България <strong>(КНОБ)</strong> и извършва оценителска дейност
+        на територията на Република България за недвижими имоти, както и за финансови активи и финансови институции.
+      </p>
+    </div>
+
+    <!-- Bottom bar -->
     <div class="footer-bottom">
       <span>© 2026 KSB Analytica. All rights reserved.</span>
       <span class="footer-legal">
         <a href="https://www.ksbanalytica.com/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>
-        ·
-        <a href="https://www.ksbanalytica.com/terms-and-conditions" target="_blank" rel="noopener">Terms and Conditions</a>
-        ·
+        <span class="footer-dot">·</span>
+        <a href="https://www.ksbanalytica.com/terms-and-conditions" target="_blank" rel="noopener">Terms &amp; Conditions</a>
+        <span class="footer-dot">·</span>
         <a href="https://www.ksbanalytica.com/cookie-policy" target="_blank" rel="noopener">Cookie Policy</a>
       </span>
     </div>

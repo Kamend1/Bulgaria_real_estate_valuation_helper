@@ -222,6 +222,26 @@
         <div class="residual-viability" id="res-viability"></div>
       </div>
 
+      <!-- Save to report -->
+      <div class="approach-save-bar" style="margin-top:1rem">
+        {% if report.concluded_value_residual %}
+        <div class="approach-saved-notice">
+          Закачено в доклада: <strong>{{ report.concluded_value_residual | format_number }} EUR</strong>
+        </div>
+        {% endif %}
+        <div class="approach-save-row">
+          <div class="income-group">
+            <label class="income-label">Остатъчна стойност на парцела</label>
+            <div class="res-computed res-computed-hl" id="save-res-display">—</div>
+          </div>
+          <form method="post" action="/comparables/save-residual" id="residual-save-form"
+                style="display:flex;align-items:flex-end">
+            <input type="hidden" name="concluded_value_residual" id="frm-res-total">
+            <button type="submit" id="btn-save-residual" class="btn-primary" disabled
+                    style="white-space:nowrap">Закачи към доклада</button>
+          </form>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -369,6 +389,14 @@
         ? '✔ Проектът е жизнеспособен при тези параметри'
         : '✘ Проектът не е жизнеспособен — разходите надвишават GDV'
     );
+
+    // Update save form
+    var savDisplay = document.getElementById('save-res-display');
+    var savInput   = document.getElementById('frm-res-total');
+    var savBtn     = document.getElementById('btn-save-residual');
+    if (savDisplay) savDisplay.textContent = _fmtEUR(Math.round(c.residual));
+    if (savInput)   savInput.value         = Math.round(c.residual);
+    if (savBtn)     savBtn.disabled        = false;
 
     // Sensitivity table — columns from pool Q25/Q75 when available
     var priceVars, priceLabels, baseColIdx;

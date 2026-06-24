@@ -1,36 +1,152 @@
 {% extends "base.html" %}
-{% block title %}Помощ — Дигитален асистент на имотния оценител{% endblock %}
+{% block title %}Помощ и методология — Дигитален асистент на имотния оценител{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* Formula display */
+  .formula-box {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--brand);
+    border-radius: 6px;
+    padding: 0.65rem 1rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9rem;
+    margin: 0.6rem 0 0.75rem;
+    color: #1e293b;
+    line-height: 1.7;
+  }
+  .formula-box .formula-label {
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--brand);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+  /* Sub-section divider */
+  .help-subsection {
+    border-top: 1px solid var(--border);
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+  }
+  /* Method badge */
+  .method-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+  .method-badge--iva { background: #dbeafe; color: #1d4ed8; }
+  .method-badge--rics { background: #f0fdf4; color: #15803d; }
+  .method-badge--ivs { background: #fef9c3; color: #854d0e; }
+  /* Two-col layout for methodology */
+  .method-two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+  @media (max-width: 700px) { .method-two-col { grid-template-columns: 1fr; } }
+  .method-box {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+  }
+  .method-box h4 {
+    font-size: 0.875rem;
+    font-weight: 700;
+    margin: 0 0 0.4rem;
+    color: var(--brand);
+  }
+  .method-box ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.84rem;
+    color: var(--text);
+    line-height: 1.6;
+  }
+  /* Parameter table */
+  .param-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-bottom: 0.75rem; }
+  .param-table th {
+    background: #f1f5f9;
+    padding: 0.4rem 0.6rem;
+    font-weight: 700;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .param-table td { padding: 0.4rem 0.6rem; border: 1px solid var(--border); vertical-align: top; }
+  .param-table tr:nth-child(even) td { background: #f8fafc; }
+  .param-table code { background: #e2e8f0; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.8rem; }
+  /* Callout variants */
+  .help-callout--info { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+  .help-callout--warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .help-callout--ok   { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+  /* Step indicators for quick start */
+  .qs-step-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--brand);
+    margin-bottom: 0.15rem;
+  }
+</style>
+{% endblock %}
 
 {% block content %}
-<h1>Помощ и документация</h1>
-<p class="hint" style="margin-bottom:1.5rem">Обяснение на всички процеси, числа и разлики в системата.</p>
+<h1>Помощ и методология</h1>
+<p class="hint" style="margin-bottom:1.5rem">
+  Техническа документация, оценителска методология и описание на всички изчисления в системата.
+  Методите са съобразени с изискванията на МСО (Международни стандарти за оценяване, IVS), RICS и КНОБ.
+</p>
 
 <!-- ═══ Quick Start ═══════════════════════════════════════════════════════════ -->
 <div class="card quickstart-card">
-  <div class="quickstart-title">Бърз старт — 3 стъпки</div>
+  <div class="quickstart-title">Бърз старт — 4 стъпки</div>
   <div class="quickstart-grid">
     <div class="quickstart-step">
       <div class="step-num">1</div>
       <div class="step-body">
-        <strong>Засичане</strong>
+        <strong>Засичане на данни</strong>
         <span>/scrape/ → Старт</span>
-        <span class="step-sub">Обновява таксономия и сваля обяви от imot.bg (~6–8 ч. при пълно покритие). Процесът е crash-resumable.</span>
+        <span class="step-sub">Автоматично събиране на обяви от imot.bg (~6–8 ч. за пълно национално покритие). Crash-resumable процес.</span>
       </div>
     </div>
     <div class="quickstart-step">
       <div class="step-num">2</div>
       <div class="step-body">
-        <strong>Намери обяви</strong>
-        <span>/listings/ → Филтри</span>
-        <span class="step-sub">Избери обяви с checkbox → "+ Добави като сравними". Select-all поддържа до 5 000 наведнъж.</span>
+        <strong>Изграждане на сравнителен пул</strong>
+        <span>/listings/ → Филтри → Добави</span>
+        <span class="step-sub">Избери обяви с checkbox → „+ Добави като сравними". Масово добавяне до 5 000 обяви наведнъж.</span>
       </div>
     </div>
     <div class="quickstart-step">
       <div class="step-num">3</div>
       <div class="step-body">
-        <strong>Анализирай</strong>
-        <span>/comparables/</span>
-        <span class="step-sub">Пин до 6 обяви · Корекция % · Статистики (мин/медиана/макс) · Excel експорт.</span>
+        <strong>Пазарен анализ</strong>
+        <span>/comparables/ → Пул + Корекции</span>
+        <span class="step-sub">Пин до 6 обяви · Корекционни проценти · Статистики · Доходен подход · Остатъчен метод.</span>
+      </div>
+    </div>
+    <div class="quickstart-step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <strong>Генериране на доклад</strong>
+        <span>/comparables/ → Excel / Word</span>
+        <span class="step-sub">Финализирай доклада → Изтегли в Excel или Word формат с пълна разбивка.</span>
       </div>
     </div>
   </div>
@@ -40,35 +156,39 @@
 <div class="help-toc">
   <strong>Съдържание</strong>
   <ol>
-    <li><a href="#architecture">⚙️ 0. Архитектура на системата</a></li>
-    <li><a href="#numbers">🔢 1. Откъде идват числата (и защо се различават)</a></li>
-    <li><a href="#scrape">🔄 2. Засичане (Scrape)</a></li>
-    <li><a href="#listings">🔍 3. Обяви и търсене</a></li>
-    <li><a href="#comparables">📊 4. Сравними и анализ</a></li>
-    <li><a href="#geo">🗺️ 5. Географски категории</a></li>
-    <li><a href="#feature-eng">🛠️ 6. Feature Engineering</a></li>
-    <li><a href="#ml">🤖 7. ML модел (LightGBM) — статус</a></li>
-    <li><a href="#db-schema">🗄️ 8. Схема на базата данни</a></li>
-    <li><a href="#faq">❓ 9. Типични въпроси</a></li>
+    <li><a href="#architecture">0. Архитектура на системата</a></li>
+    <li><a href="#numbers">1. Брояч на обяви — защо числата се различават</a></li>
+    <li><a href="#scrape">2. Засичане (Scrape)</a></li>
+    <li><a href="#listings">3. Обяви и търсене</a></li>
+    <li><a href="#comparables">4. Пазарен сравнителен подход</a></li>
+    <li><a href="#income">5. Доходен подход — директна капитализация и DCF</a></li>
+    <li><a href="#residual">6. Остатъчен метод (метод на предприемача)</a></li>
+    <li><a href="#reports">7. Доклади</a></li>
+    <li><a href="#analytics">8. Пазарни статистики</a></li>
+    <li><a href="#geo">9. Географски категории</a></li>
+    <li><a href="#feature-eng">10. Обработка на данните (Feature Engineering)</a></li>
+    <li><a href="#ml">11. ML модел (LightGBM)</a></li>
+    <li><a href="#db-schema">12. Схема на базата данни</a></li>
+    <li><a href="#faq">13. Типични въпроси</a></li>
   </ol>
 </div>
 
 <!-- ═══ 0. Архитектура ════════════════════════════════════════════════════════ -->
 <section class="help-section" id="architecture">
-  <h2>⚙️ 0. Архитектура на системата</h2>
+  <h2>0. Архитектура на системата</h2>
 
-  <p>Системата се състои от пет последователни стъпки — от imot.bg до PostgreSQL и анализните инструменти.</p>
+  <p>Системата е изградена като петстъпков тръбопровод (pipeline) — от imot.bg до PostgreSQL и анализните инструменти на оценителя.
+  Всяка стъпка е атомарна и устойчива на прекъсване.</p>
 
   <div class="pipeline-steps">
     <div class="pipeline-step">
       <div class="step-num">1</div>
       <div class="step-body">
-        <strong>Taxonomy (Notebook 01 / автоматично при всяко засичане)</strong>
-        Чете sitemap index-а на imot.bg (~1.9 млн. URL-а), обхожда всички 44 child sitemaps и извлича
+        <strong>Таксономия (автоматично при всяко засичане)</strong>
+        Чете sitemap index-а на imot.bg (~1.9 млн. URL-а), обхожда всички child sitemaps и извлича
         валидните <code>/obiavi/</code> URL-и. Генерира три CSV файла в <code>data/taxonomy/</code>:
         <code>valid_deal_types.csv</code>, <code>valid_geo_paths.csv</code> (~5 500 комбинации),
-        <code>valid_property_types.csv</code> (22 типа имот). При стартиране от приложението тази стъпка
-        се извършва автоматично в началото на всяко засичане.
+        <code>valid_property_types.csv</code> (22 типа имот).
       </div>
     </div>
     <div class="pipeline-step">
@@ -76,7 +196,7 @@
       <div class="step-body">
         <strong>Crawl — събиране на URL-и на обяви</strong>
         За всяка комбинация (тип сделка × географски път × тип имот) системата обхожда страниците
-        с резултати на imot.bg паралелно (8 нишки). Събира URL-ите на всички индивидуални обяви
+        с резултати паралелно (8 нишки). Събира URL-ите на всички индивидуални обяви
         и записва прогреса в checkpoint файл — при прекъсване продължава от последния завършен маршрут.
       </div>
     </div>
@@ -84,10 +204,10 @@
       <div class="step-num">3</div>
       <div class="step-body">
         <strong>Download + Parse</strong>
-        Всяка обява се изтегля (HTML, Windows-1251 кодиране) и парсва от <code>ad_parsing_utils.py</code>.
+        Всяка обява се изтегля (HTML, Windows-1251 кодиране, 24 паралелни нишки) и парсва.
         Извличат се: цена (EUR/BGN), площ, етаж, конструкция, година на строеж, характеристики,
         описание, локация. HTML файловете се кешират локално в <code>data/raw_listing_html/</code>
-        (наименувани по SHA-256 на URL-а).
+        (наименувани по SHA-256 хеш на URL-а, първите 16 символа).
       </div>
     </div>
     <div class="pipeline-step">
@@ -96,18 +216,18 @@
         <strong>Feature Engineering</strong>
         Всеки парснат ред преминава през <code>engineer_features()</code> — нормализация на deal type,
         парсване на дата, изчисляване на <code>price_per_sqm_model</code>, присвояване на
-        <code>geo_category</code>, корекция на площ при земеделска земя. Вижте
-        <a href="#feature-eng">Секция 6</a> за детайли.
+        <code>geo_category</code>, корекция на площ при земеделска земя.
+        Вижте <a href="#feature-eng">Секция 10</a> за детайли.
       </div>
     </div>
     <div class="pipeline-step">
       <div class="step-num">5</div>
       <div class="step-body">
         <strong>PostgreSQL — upsert + snapshot</strong>
-        Обявите се upsert-ват в таблица <code>listings</code> (upsert key: <code>ad_url</code>).
+        Обявите се upsert-ват в таблица <code>listings</code> (upsert ключ: <code>ad_url</code>).
         Полетата <code>first_seen_at</code> и <code>published_date</code> никога не се презаписват.
-        Всяко засичане добавя нов ред в <code>listing_snapshots</code> — история на цената дори
-        при непроменена стойност. При пълно национално покритие стари обяви се архивират автоматично.
+        Всяко засичане добавя нов ред в <code>listing_snapshots</code> — ценова история дори
+        при непроменена стойност.
       </div>
     </div>
   </div>
@@ -115,75 +235,74 @@
 
 <!-- ═══ 1. Числата ════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="numbers">
-  <h2>🔢 1. Откъде идват числата (и защо се различават)</h2>
+  <h2>1. Брояч на обяви — защо числата се различават</h2>
 
-  <p>В системата има три различни брояча, всеки от които мери различно нещо:</p>
+  <p>В системата има три различни брояча, всеки от които прилага различни критерии за включване:</p>
 
   <table class="help-table">
     <thead>
       <tr>
-        <th>Число</th>
+        <th>Показател</th>
         <th>Страница</th>
-        <th>SQL / Логика</th>
-        <th>Обяснение</th>
+        <th>SQL условие</th>
+        <th>Семантика</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>listings_upserted</strong><br>(напр. 164 982)</td>
+        <td><strong>listings_upserted</strong></td>
         <td>Засичане → история</td>
         <td><code>scrape_runs.listings_upserted</code></td>
         <td>
-          Броят редове, успешно записани в БД при конкретно засичане/импорт.
-          Включва <em>всички</em> обяви — и тези без цена, и тези с грешни данни.
+          Брой редове, успешно записани в БД при конкретно засичане.
+          Включва <em>всички</em> обяви — и без цена, и с непознат тип сделка.
         </td>
       </tr>
       <tr>
-        <td><strong>Обяви за продажба</strong><br>(напр. 164 658)</td>
+        <td><strong>Обяви за продажба</strong></td>
         <td>Начало</td>
-        <td><code>count(*) WHERE deal_type_normalized = 'sale'</code></td>
+        <td><code>deal_type_normalized = 'sale'</code></td>
         <td>
-          Всички обяви в таблица <code>listings</code>, класифицирани като продажба.
-          По-малко от горното, защото някои обяви имат <code>deal_type_normalized = 'unknown'</code>
-          (полето <code>deal_raw</code> в HTML не е разпознато).
+          Обяви с разпознат тип сделка. По-малко от горното, защото
+          <code>deal_type_normalized = 'unknown'</code> се изключват.
         </td>
       </tr>
       <tr>
-        <td><strong>Намерени: N обяви</strong><br>(напр. 163 439)</td>
+        <td><strong>Намерени: N обяви</strong></td>
         <td>Обяви → търсене</td>
-        <td><code>WHERE total_price IS NOT NULL AND price_per_sqm_model IS NOT NULL</code></td>
+        <td><code>total_price IS NOT NULL AND price_per_sqm_model IS NOT NULL</code></td>
         <td>
-          Обявите, показвани при търсене. Винаги се изисква валидна цена и цена/кв.м —
-          обяви без тях не се показват, защото не са полезни за оценка.
+          Обявите, показвани при търсене. Изисква валидна цена <em>и</em> площ —
+          без тях оценката е невъзможна.
         </td>
       </tr>
     </tbody>
   </table>
 
   <div class="help-callout">
-    <strong>Пример с числата по-горе:</strong><br>
+    <strong>Илюстративен пример:</strong><br>
     164 982 (засичане) − 164 658 (продажби) = <strong>324 обяви</strong> с неразпознат тип сделка<br>
-    164 658 (продажби) − 163 439 (търсими) = <strong>1 219 обяви</strong> за продажба без валидна цена или площ
+    164 658 (продажби) − 163 439 (търсими) = <strong>1 219 обяви</strong> без валидна цена или площ
   </div>
 </section>
 
 <!-- ═══ 2. Засичане ═══════════════════════════════════════════════════════════ -->
 <section class="help-section" id="scrape">
-  <h2>🔄 2. Засичане (Scrape)</h2>
+  <h2>2. Засичане (Scrape)</h2>
 
   <p>Страницата <strong>Засичане</strong> позволява ръчно стартиране на ново засичане на imot.bg.
   Прогресът се показва в реално време чрез SSE (Server-Sent Events). Засичането върви като
-  самостоятелен OS процес — независим от уеб сървъра.</p>
+  самостоятелен OS процес — независим от уеб сървъра и браузъра.</p>
 
   <h3>Статуси на засичане</h3>
   <table class="help-table">
     <thead><tr><th>Статус</th><th>Значение</th></tr></thead>
     <tbody>
-      <tr><td><code>running</code></td><td>В момента тече</td></tr>
+      <tr><td><code>running</code></td><td>В момента тече активно</td></tr>
       <tr><td><code>completed</code></td><td>Завършено успешно</td></tr>
-      <tr><td><code>interrupted</code></td><td>Спряно от потребителя или прекъснато</td></tr>
+      <tr><td><code>interrupted</code></td><td>Спряно от потребителя или прекъснато от системата</td></tr>
       <tr><td><code>failed</code></td><td>Грешка по време на изпълнение</td></tr>
-      <tr><td><code>imported</code></td><td>Данни са наляти от parquet файл (исторически импорт)</td></tr>
+      <tr><td><code>imported</code></td><td>Данни са заредени от parquet файл (исторически импорт)</td></tr>
     </tbody>
   </table>
 
@@ -191,15 +310,15 @@
   <table class="help-table">
     <thead><tr><th>Колона</th><th>Значение</th></tr></thead>
     <tbody>
-      <tr><td>Маршрути</td><td>Завършени / общо комбинации (тип × район × тип имот)</td></tr>
+      <tr><td>Маршрути</td><td>Завършени / общо комбинации (тип сделка × район × тип имот)</td></tr>
       <tr><td>Обяви</td><td>Уникални URL-и на обяви, открити при засичането</td></tr>
       <tr><td>Вписани</td><td>Обяви, успешно парснати и записани в базата данни</td></tr>
     </tbody>
   </table>
 
   <div class="help-callout">
-    При ново засичане обявите се <strong>upsert-ват</strong> (не се дублират).
-    Ако обявата съществува, се обновяват цена, площ, дата на последно виждане и views.
+    При ново засичане обявите се <strong>upsert-ват</strong> — не се дублират.
+    Ако обявата съществува, се обновяват: цена, площ, дата на последно виждане и брой преглеждания.
     Всяко засичане добавя нов <em>snapshot</em> в <code>listing_snapshots</code> —
     така се следи историята на цените дори при непроменена стойност.
   </div>
@@ -207,10 +326,9 @@
 
 <!-- ═══ 3. Обяви ══════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="listings">
-  <h2>🔍 3. Обяви и търсене</h2>
+  <h2>3. Обяви и търсене</h2>
 
-  <p>Страницата <strong>Обяви</strong> показва само обяви с валидна цена <em>и</em> площ
-  (<code>total_price IS NOT NULL AND price_per_sqm_model IS NOT NULL</code>).
+  <p>Страницата <strong>Обяви</strong> показва само обяви с валидна цена <em>и</em> цена/кв.м.
   Обяви без тези данни са в базата, но не се показват при търсене.</p>
 
   <h3>Налични филтри</h3>
@@ -222,93 +340,673 @@
       <tr><td>Пазарен сегмент</td><td><code>geo_category</code></td><td>= ANY(избрани категории)</td></tr>
       <tr><td>Населено място</td><td><code>title_city_model</code></td><td>Exact match от нормализирано поле</td></tr>
       <tr><td>Квартал</td><td><code>location_level_2_model</code></td><td>ILIKE %текст% — динамично по избран град</td></tr>
-      <tr><td>Цена / Площ / Цена кв.м</td><td>Числови полета</td><td>&gt;= мин и &lt;= макс</td></tr>
+      <tr><td>Цена / Площ / EUR/кв.м</td><td>Числови полета</td><td>&gt;= мин и &lt;= макс (обхват)</td></tr>
     </tbody>
   </table>
 
   <h3>Ценови тренд (▼ / ▲ / =)</h3>
-  <p>Сравнява текущата <code>price_per_sqm_model</code> с предходния snapshot за същата обява.
-  Ако обявата е нова (само един snapshot) — показва се като "нова".</p>
+  <p>Иконата сравнява текущата <code>price_per_sqm_model</code> с предходния snapshot за същата обява.
+  Ако обявата се вижда за първи път (един единствен snapshot) — показва се като „нова".</p>
 
-  <h3>Добавяне към сравними</h3>
+  <h3>Добавяне към сравнителен пул</h3>
   <p>Изберете обяви с checkbox → натиснете
-  <strong>"+ Добави като продажни / наемни сравними"</strong>.
-  Бутонът <strong>Избери всички</strong> избира до 5 000 обяви, съответстващи на текущите филтри.</p>
+  <strong>„+ Добави като продажни / наемни сравними"</strong>.
+  Бутонът <strong>Избери всички</strong> избира до 5 000 обяви, съответстващи на текущите активни филтри.
+  Таблицата <code>comparable_pool</code> предпазва от дублиране чрез unique constraint.</p>
 
-  <h3>Детайлна страница</h3>
+  <h3>Детайлна страница на обява</h3>
   <p>Всяка обява има детайлна страница (<code>/listings/{id}</code>) с пълна информация
-  и таблица с историята на цените — всички snapshots с дата, цена/кв.м и дни на пазара.</p>
+  и хронологична таблица с ценовата история — всички snapshots с дата, цена/кв.м и дни на пазара (DOM).</p>
 </section>
 
-<!-- ═══ 4. Сравними ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 4. Пазарен сравнителен подход ════════════════════════════════════════ -->
 <section class="help-section" id="comparables">
-  <h2>📊 4. Сравними и анализ</h2>
+  <h2>4. Пазарен сравнителен подход <span class="method-badge method-badge--ivs">IVS 105</span></h2>
 
-  <p>Страницата <strong>Сравними</strong> реализира пазарния и доходния подход за оценка на имоти.</p>
+  <p>Пазарният сравнителен подход (Sales Comparison Approach) е утвърден метод за оценяване на имоти
+  съгласно <strong>IVS 105 — Sales Comparison Approach</strong> (International Valuation Standards Council)
+  и стандартите на КНОБ. Подходът е основан на принципа на заместването —
+  <em>информиран купувач не би платил повече за даден имот от цената на сравним заместим имот.</em></p>
 
-  <h3>Анализен пул (без лимит)</h3>
-  <p>Всички добавени обяви са в пула. Статистиките се изчисляват автоматично в реално време:</p>
+  <div class="help-subsection">
+    <h3>Анализен пул (без лимит)</h3>
+    <p>Всички добавени обяви формират сравнителния пул. Статистиките се изчисляват автоматично
+    върху <strong>всички</strong> обяви в пула за цената/кв.м (<code>price_per_sqm_model</code>):</p>
+    <table class="help-table">
+      <thead><tr><th>Метрика</th><th>Формула / Дефиниция</th><th>Практическо значение</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Минимум</strong></td>
+          <td>min(цена/кв.м) на пула</td>
+          <td>Долна граница — евентуален outlier или имот в лошо състояние</td>
+        </tr>
+        <tr>
+          <td><strong>Q25 (Р25)</strong></td>
+          <td>25-ти персентил</td>
+          <td>75% от пула е над тази стойност; дъно на „нормалния" пазар</td>
+        </tr>
+        <tr>
+          <td><strong>Медиана (Q50)</strong></td>
+          <td>50-ти персентил — стойността, под/над която са по 50% от обявите</td>
+          <td><strong>Предпочитана централна мярка</strong> — устойчива на крайни стойности (outliers)</td>
+        </tr>
+        <tr>
+          <td><strong>Средно</strong></td>
+          <td>Σ(цена/кв.м) / n</td>
+          <td>Аритметична средна; чувствителна към outliers — интерпретирайте внимателно</td>
+        </tr>
+        <tr>
+          <td><strong>Q75 (Р75)</strong></td>
+          <td>75-ти персентил</td>
+          <td>Горна граница на „нормалния" пазар; само 25% от пула е по-скъп</td>
+        </tr>
+        <tr>
+          <td><strong>Максимум</strong></td>
+          <td>max(цена/кв.м) на пула</td>
+          <td>Горна граница — евентуален outlier или луксозен имот</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="help-callout help-callout--info">
+      <strong>Интерквартилен диапазон (IQR = Q75 − Q25)</strong> представлява централните 50% от пазара.
+      Стойностите извън [Q25 − 1.5 × IQR, Q75 + 1.5 × IQR] обикновено се считат за статистически outliers.
+      В оценителската практика медианата в рамките на IQR е най-надеждният ориентир за пазарната стойност.
+    </div>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Включване в доклад (📌 Пин)</h3>
+    <p>Пинатите обяви са избраните сравними за доклада — аналог на „Comparable Sales Table" в западната практика.
+    Натиснете бутона за пин до обява → тя се маркира в зелено и влиза в доклада.
+    <strong>Максимум 6 обяви от всеки тип</strong> могат да бъдат включени (ограничение на таблицата в Word/Excel).
+    Пинатите обяви излизат в горната част на таблицата.</p>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Корекции (%)</h3>
+    <p>Съгласно IVS 105, сравнимите имоти рядко са идентични с оценявания обект.
+    Корекционният процент отчита разликите в атрибути като местоположение, площ, етаж, изложение,
+    конструкция и техническо състояние.</p>
+
+    <div class="formula-box">
+      <span class="formula-label">Формула за коригирана цена</span>
+      Кор.цена/кв.м = Цена/кв.м × (1 + Корекция% / 100)
+    </div>
+
+    <p><strong>Знак на корекцията:</strong></p>
+    <ul style="font-size:0.88rem;margin-bottom:0.5rem;line-height:1.7;padding-left:1.2rem">
+      <li><strong>Отрицателна корекция (–%)</strong>: сравнимата е по-добра от оценявания обект (напр. по-добро местоположение, по-ново строителство) — коригираме надолу</li>
+      <li><strong>Положителна корекция (+%)</strong>: сравнимата е по-лоша от оценявания обект — коригираме нагоре</li>
+    </ul>
+
+    <div class="help-callout help-callout--warn">
+      <strong>Принцип на минималните корекции:</strong> RICS и IVS препоръчват корекциите да са базирани на
+      пазарни данни, а не на субективна преценка. Корекции над ±25% на отделен атрибут намаляват надеждността
+      на метода. Ако оценяваният имот се различава съществено от наличния пул, пулът следва да бъде разширен.
+    </div>
+
+    <p>Полето <strong>Бележка</strong> позволява документиране на обосновката за всяка корекция —
+    изискване при изготвяне на формален оценителски доклад.</p>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Excel и Word експорт</h3>
+    <p>Бутонът <strong>Excel</strong> генерира <code>.xlsx</code> файл с два worksheet-а:
+    <em>Продажни сравними</em> и <em>Наемни сравними</em>. Включва статистиките,
+    всички обяви от пула (пинатите са оцветени в зелено, оценяваният обект — в жълто)
+    и автоматична ширина на колоните.</p>
+    <p>Бутонът <strong>Word</strong> генерира <code>.docx</code> документ с таблица на сравнимите,
+    секция за данни на оценявания обект и заключителна таблица с всички закачени стойности
+    (пазарен подход, доходен подход, остатъчен метод).</p>
+  </div>
+</section>
+
+<!-- ═══ 5. Доходен подход ═════════════════════════════════════════════════════ -->
+<section class="help-section" id="income">
+  <h2>5. Доходен подход <span class="method-badge method-badge--ivs">IVS 105</span> <span class="method-badge method-badge--rics">RICS GN</span></h2>
+
+  <p>Доходният подход (Income Capitalisation Approach) определя стойността на имота като сегашна
+  стойност на очакваните бъдещи приходи от него. Методът е приложим основно за <strong>доходоносни имоти</strong> —
+  жилища, офиси, магазини, складове — при наличие на наемен пазар за сравнение.
+  Системата имплементира два метода: <strong>директна капитализация</strong> и <strong>дисконтиран паричен поток (DCF)</strong>.</p>
+
+  <div class="help-subsection">
+    <h3>Доходни показатели</h3>
+
+    <div class="formula-box">
+      <span class="formula-label">Годишен потенциален приход (GPI)</span>
+      GPI = Наем/кв.м/мес × 12
+    </div>
+
+    <div class="formula-box">
+      <span class="formula-label">Нетен оперативен доход (NOI)</span>
+      NOI = GPI × (1 − Разходи%) × (1 − Незаетост%)
+    </div>
+
+    <table class="param-table">
+      <thead><tr><th>Параметър</th><th>Символ</th><th>Описание</th><th>Типична стойност (БГ)</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Наем/кв.м/мес</td>
+          <td><code>r</code></td>
+          <td>Пазарен наем за 1 кв.м на месец в EUR. Препоръчва се да се използва <strong>медианата от наемния пул</strong>.</td>
+          <td>8–20 EUR/кв.м (Сф. центр)</td>
+        </tr>
+        <tr>
+          <td>Разходи %</td>
+          <td><code>e</code></td>
+          <td>Дял на оперативните разходи (такси, застраховки, управление, ремонти) от GPI.</td>
+          <td>15–25%</td>
+        </tr>
+        <tr>
+          <td>Незаетост %</td>
+          <td><code>v</code></td>
+          <td>Очакван дял от времето без наемател. Отразява риска от период без приход.</td>
+          <td>5–12%</td>
+        </tr>
+        <tr>
+          <td>Брутна доходност</td>
+          <td><code>GY</code></td>
+          <td>GPI / Пазарна цена × 100%. Груб индикатор без отчитане на разходи.</td>
+          <td>4–7% (жилищни)</td>
+        </tr>
+        <tr>
+          <td>Нетна доходност</td>
+          <td><code>NY</code></td>
+          <td>NOI / Пазарна цена × 100%. По-точен индикатор — сравнима с безрисковата норма.</td>
+          <td>2.5–5% (жилищни)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Метод 1: Директна капитализация</h3>
+
+    <p>Директната капитализация преобразува стабилен NOI в стойност чрез <strong>капитализационна норма</strong> (Cap Rate).
+    Методът предполага, че NOI е постоянен и представителен за бъдещите периоди —
+    подходящ при стабилизирани имоти на зрял пазар.</p>
+
+    <div class="formula-box">
+      <span class="formula-label">Директна капитализация — стойност/кв.м</span>
+      V = NOI / R_cap
+    </div>
+
+    <table class="param-table">
+      <thead><tr><th>Параметър</th><th>Символ</th><th>Описание</th><th>Типична стойност (БГ)</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Cap Rate</td>
+          <td><code>R_cap</code></td>
+          <td>Изисквана норма на доходност, извлечена от пазарни трансакции — отношение NOI/Цена на продадени имоти.
+          <strong>По-висок Cap Rate = по-висок риск = по-ниска стойност.</strong></td>
+          <td>4–8% (жилищни, Сф.)<br>7–12% (регионални)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="help-callout help-callout--info">
+      <strong>Извличане на Cap Rate от пазара:</strong> Cap Rate = NOI / Транзакционна цена.
+      При наличие на наемен пул и продажен пул в системата, Cap Rate може да бъде изчислен директно:
+      Cap Rate ≈ NOI_от_наемен_пул / Медиана_от_продажния_пул.
+      Системата показва автоматично полученото сравнение (% над/под пазарната цена) при всяко изчисление.
+    </div>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Метод 2: Дисконтиран паричен поток (DCF)</h3>
+
+    <p>DCF анализира имота като финансов актив с краен хоризонт на задържане.
+    Приложим при нестабилни или нарастващи наеми и при имоти с развиващ се потенциал.
+    Методът е по-чувствителен към допусканията за ставката на дисконтиране и терминалния cap rate.</p>
+
+    <div class="formula-box">
+      <span class="formula-label">DCF — стойност/кв.м</span>
+      V = Σ [NOI_t / (1 + r)^t] + TV / (1 + r)^n
+      <br><br>
+      където:
+        NOI_t = NOI × (1 + g)^(t−1)          — NOI в година t (расте с g%)
+        TV    = NOI_{n+1} / R_terminal         — Терминална стойност (Гордонов модел)
+        r     = Cap Rate                        — Дисконтова норма (= изисквана доходност)
+        n     = Хоризонт на задържане (год.)
+        g     = Годишен ръст на наема
+    </div>
+
+    <table class="param-table">
+      <thead><tr><th>Параметър</th><th>Описание</th><th>Насока</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Ръст наем %/год</td>
+          <td>Очакван средногодишен реален ръст на наема. Препоръчва се консервативна оценка — инфлация минус
+          корекция за пазарен риск.</td>
+          <td>1–3% в реален израз</td>
+        </tr>
+        <tr>
+          <td>Хоризонт (год.)</td>
+          <td>Период на задържане на имота. При жилищни имоти обичайно 5–10 г.;
+          при търговски — 7–15 г. Краят на хоризонта е хипотетичната дата на продажба.</td>
+          <td>5–10 год. (жилищни)</td>
+        </tr>
+        <tr>
+          <td>Терм. Cap Rate %</td>
+          <td>Cap Rate, по който имотът ще бъде оценен в края на хоризонта. Обичайно
+          <strong>по-висок от входящия cap rate</strong> с 25–75 bps, за да отрази по-голямата
+          амортизация и пазарна несигурност в далечното бъдеще.</td>
+          <td>R_cap + 0.5%</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="method-two-col">
+      <div class="method-box">
+        <h4>Кога да изберете Директна капитализация</h4>
+        <ul>
+          <li>Стабилизиран имот с устойчив наемател</li>
+          <li>Зрял пазар с доброто предлагане на данни за Cap Rate</li>
+          <li>Краткосрочна оценка (нотариален акт, рефинансиране)</li>
+          <li>Когато предположенията за растеж са несигурни</li>
+        </ul>
+      </div>
+      <div class="method-box">
+        <h4>Кога да изберете DCF</h4>
+        <ul>
+          <li>Нова сграда или обект в процес на стабилизация</li>
+          <li>Имот с нестабилен или нарастващ наем</li>
+          <li>Дългосрочна инвестиционна оценка</li>
+          <li>Когато пазарните данни за Cap Rate са ограничени</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Закачане към доклада</h3>
+    <p>След изчислението изберете предпочитания метод (Директна капитализация или DCF),
+    въведете площта на оценявания обект и натиснете <strong>„Закачи към доклада"</strong>.
+    Системата изчислява общата стойност (<code>concluded_value_income</code>) и я записва в доклада.
+    Закаченият резултат се появява в Word доклада в секцията за заключителни стойности.</p>
+
+    <div class="help-callout help-callout--ok">
+      <strong>Препоръка:</strong> При съществено разминаване между двата метода (&gt;15%) документирайте
+      причините в бележките на доклада. Типични причини: различни допускания за ръст или несигурен пазар
+      за Cap Rate.
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 6. Остатъчен метод ════════════════════════════════════════════════════ -->
+<section class="help-section" id="residual">
+  <h2>6. Остатъчен метод (метод на предприемача) <span class="method-badge method-badge--ivs">IVS 410</span></h2>
+
+  <p>Остатъчният метод (Residual / Development Appraisal Method) определя пазарната стойност на
+  <strong>незастроен или подлежащ на застрояване парцел</strong> като остатъкът след приспадане на
+  всички разходи за реализация на проекта и нормалната предприемаческа печалба от брутната
+  развойна стойност (GDV):</p>
+
+  <div class="formula-box">
+    <span class="formula-label">Основна формула — остатъчен метод</span>
+    RLV = GDV − TDC − Предприемаческа печалба
+
+    където:
+      RLV = Residual Land Value (остатъчна стойност на парцела)
+      GDV = Gross Development Value (брутна развойна стойност)
+      TDC = Total Development Costs (общи разходи за развитие)
+  </div>
+
+  <div class="help-subsection">
+    <h3>Параметри на парцела и ПУП</h3>
+
+    <table class="param-table">
+      <thead><tr><th>Параметър</th><th>Символ</th><th>Описание</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Площ на парцела</td>
+          <td><code>A_plot</code></td>
+          <td>Регулационната площ на поземления имот в кв.м.</td>
+        </tr>
+        <tr>
+          <td>КЗП (Кoeficient на Застрояване по Площ)</td>
+          <td><code>BCR</code></td>
+          <td>Максималният дял от парцела, покрит от сградата (Building Coverage Ratio).
+          Задава се в ПУП. Стойност 0.40 означава, че до 40% от парцела може да бъде застроено.</td>
+        </tr>
+        <tr>
+          <td>КИЗ (Коефициент на Интензивност на Застрояване)</td>
+          <td><code>FAR / PLR</code></td>
+          <td>Floor Area Ratio — съотношение между общата разгъната застроена площ (РЗП) и площта на парцела.
+          КИЗ = 2.0 означава, че РЗП може да е до двойната площ на парцела.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="formula-box">
+      <span class="formula-label">Производни величини от ПУП</span>
+      Застроена площ (Footprint) = A_plot × КЗП
+      РЗП (GBA)                  = A_plot × КИЗ
+      Брой етажи (implied)       = КИЗ / КЗП
+    </div>
+
+    <div class="help-callout help-callout--info">
+      Броят на implied floors е теоретичен (КИЗ / КЗП). В реалното проектиране той може да варира
+      в зависимост от архитектурното решение, паркинг нивата под терена и технически ограничения.
+    </div>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Брутна развойна стойност (GDV)</h3>
+
+    <p>GDV представлява пазарната стойност на завършения строителен продукт — стойността на
+    всички продаваеми единици (апартаменти, офиси, търговски площи) при пазарни цени
+    <strong>в момента на оценката</strong>. GDV <em>не</em> е цената на парцела —
+    той представлява крайния продукт след реализация на целия инвестиционен проект.</p>
+
+    <div class="formula-box">
+      <span class="formula-label">GDV — брутна развойна стойност</span>
+      Продаваема площ = РЗП × Продаваема%
+      GDV             = Продаваема площ × Цена/кв.м (завършени единици)
+    </div>
+
+    <div class="help-callout help-callout--warn">
+      <strong>Важно:</strong> Продажната цена/кв.м в калкулатора трябва да отразява цената на
+      <em>завършените жилищни/търговски единици</em> — не цената на парцела.
+      Препоръчва се използване на медианата от <strong>продажния пул</strong>, ако сравнимите
+      са имоти в завършени сгради в същия район.
+    </div>
+
+    <table class="param-table">
+      <thead><tr><th>Параметър</th><th>Описание</th><th>Типична стойност</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Продаваема % от РЗП</td>
+          <td>Делът от РЗП, реализиран на пазара. Общите части, паркинги (без отделна продажба),
+          техн. помещения намаляват продаваемата площ спрямо РЗП.</td>
+          <td>70–85% (жилищно)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Разходи за развитие (TDC)</h3>
+
+    <div class="formula-box">
+      <span class="formula-label">Общи разходи за развитие (TDC)</span>
+      Строителни разходи    = Цена/кв.м РЗП × РЗП
+      Проектиране           = Строителни × Проектиране%
+      Непредвидени          = Строителни × Непредвидени%
+      Маркетинг             = GDV × Маркетинг%
+      Финансиране           = (Строителни + Проектиране + Непредвидени + Маркетинг) × Финансиране%
+      ─────────────────────────────────────────────────────────────────
+      TDC = Строителни + Проектиране + Непредвидени + Маркетинг + Финансиране
+    </div>
+
+    <table class="param-table">
+      <thead><tr><th>Компонент</th><th>База на изчисление</th><th>Описание</th><th>Типична стойност</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Строителни разходи</td>
+          <td>EUR/кв.м РЗП</td>
+          <td>Директни строителни разходи — конструкция, довършителни работи, ВиК, ел., ОВИК.
+          Изисква пазарна оферта или актуална НСССО справка.</td>
+          <td>500–900 EUR/кв.м (жилищно, 2024–2025)</td>
+        </tr>
+        <tr>
+          <td>Проектиране и консултации</td>
+          <td>% от строителни</td>
+          <td>Архитектурен и инженерен проект, надзор, одит, консултантски хонорари.</td>
+          <td>8–12%</td>
+        </tr>
+        <tr>
+          <td>Непредвидени разходи</td>
+          <td>% от строителни</td>
+          <td>Резерв за непредвидени технически или административни разходи. RICS препоръчва минимум 5%.</td>
+          <td>5–10%</td>
+        </tr>
+        <tr>
+          <td>Маркетинг и реализация</td>
+          <td>% от GDV</td>
+          <td>Разходи за продажба: агентски комисионни, реклама, разходи за пускане на пазара.</td>
+          <td>1.5–3.5%</td>
+        </tr>
+        <tr>
+          <td>Финансиране</td>
+          <td>% от TDC (без финансиране)</td>
+          <td>Лихвени разходи по строителен кредит. Алтернативно: opportunity cost на собствен капитал.</td>
+          <td>5–8%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Предприемаческа печалба</h3>
+    <p>Предприемаческата печалба (Developer's Profit / Entrepreneurial Incentive) е нормалната пазарна
+    компенсация за инвестиционния риск, вложеното управленско усилие и времето за реализация на проекта.
+    Тя <em>не</em> е „печалба" в счетоводния смисъл — тя е изискуем доход за поемане на риска
+    и се третира като разход на проекта при остатъчния метод.</p>
+
+    <div class="formula-box">
+      <span class="formula-label">Предприемаческа печалба</span>
+      Предприемаческа печалба = GDV × Печалба%
+    </div>
+
+    <table class="param-table">
+      <thead><tr><th>Тип застрояване</th><th>Типична печалба % от GDV</th></tr></thead>
+      <tbody>
+        <tr><td>Жилищно (стандартно)</td><td>15–25%</td></tr>
+        <tr><td>Търговско / офиси</td><td>15–20%</td></tr>
+        <tr><td>Смесено предназначение</td><td>18–25%</td></tr>
+        <tr><td>Луксозно жилищно</td><td>20–30%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Жизнеспособност на проекта</h3>
+    <p>Проектът е <strong>жизнеспособен</strong> когато <code>RLV &gt;= 0</code> —
+    т.е. остава положителна стойност за парцела след покриване на всички разходи и печалба.
+    Отрицателна RLV означава, че при тези параметри <em>никоя</em> стойност на парцела не прави
+    проекта рентабилен — необходимо е преразглеждане на разходите, програмата или ценовото ниво.</p>
+
+    <div class="help-callout help-callout--warn">
+      <strong>Граничен анализ:</strong> При RLV близо до нула (напр. &lt;5% от GDV) проектът е маргинален.
+      Малки отклонения в строителните разходи или пазарните цени могат да го направят нежизнеспособен.
+      В такива случаи чувствителностният анализ (таблицата по-долу) е от ключово значение.
+    </div>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Таблица за чувствителност</h3>
+    <p>Таблицата за чувствителност изследва как RLV/кв.м парцел се променя при
+    вариране на <strong>строителните разходи</strong> (редове: ±10%, ±20% от базата) и
+    <strong>продажната цена/кв.м</strong> (колони: Q25, Q25↔Медиана, Медиана, Медиана↔Q75, Q75 от продажния пул).</p>
+
+    <p>Клетките са оцветени по скала: <span style="background:#dcfce7;padding:0.1rem 0.4rem;border-radius:3px">зелено = положителна RLV (жизнеспособен)</span> /
+    <span style="background:#fee2e2;padding:0.1rem 0.4rem;border-radius:3px">червено = отрицателна RLV (нежизнеспособен)</span>.
+    Контурът маркира базовия сценарий. Таблицата се появява автоматично при попълнени задължителни полета.</p>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Закачане към доклада</h3>
+    <p>Натиснете <strong>„Закачи към доклада"</strong> след получен резултат.
+    Системата записва <code>concluded_value_residual</code> в доклада.
+    Стойността се появява в Word доклада като „Стойност на парцела (остатъчен метод)"
+    в заключителната таблица.</p>
+  </div>
+</section>
+
+<!-- ═══ 7. Доклади ════════════════════════════════════════════════════════════ -->
+<section class="help-section" id="reports">
+  <h2>7. Доклади</h2>
+
+  <p>Страницата <strong>Доклади</strong> (<code>/reports/</code>) показва всички оценителски доклади
+  на потребителя. Всеки нов доклад се създава автоматично при влизане в Сравними, ако няма активен draft.</p>
+
+  <h3>Статуси на доклад</h3>
   <table class="help-table">
-    <thead><tr><th>Метрика</th><th>Значение</th></tr></thead>
+    <thead><tr><th>Статус</th><th>Значение</th><th>Действия</th></tr></thead>
     <tbody>
-      <tr><td>Минимум / Максимум</td><td>Граници на разпределението</td></tr>
-      <tr><td>Q25 / Q75</td><td>Интерквартилен диапазон — средните 50% от пазара</td></tr>
-      <tr><td>Медиана</td><td>Стойността, под която са 50% от обявите. По-устойчива от средното при крайни стойности.</td></tr>
-      <tr><td>Средно</td><td>Аритметична средна. Чувствителна към изключения (outliers).</td></tr>
+      <tr>
+        <td><code>draft</code></td>
+        <td>Работен вариант — редактируем. Само един draft може да е активен едновременно.</td>
+        <td>Редактиране, добавяне на сравними, Финализирай, Нов доклад</td>
+      </tr>
+      <tr>
+        <td><code>finalized</code></td>
+        <td>Финализиран доклад — само за четене. Данните са замразени.</td>
+        <td>Изтегляне (Excel/Word), Преглед</td>
+      </tr>
     </tbody>
   </table>
 
-  <h3>Включване в доклад (📌)</h3>
-  <p>Натиснете бутона за pin до обява → тя се маркира в зелено и влиза в доклада.
-  Максимум <strong>6 обяви от всеки тип</strong> могат да бъдат пинати
-  (ограничение на таблицата в Word/Excel доклада).
-  Пинатите обяви излизат в горната част на таблицата.</p>
+  <h3>Данни на оценявания обект</h3>
+  <p>В секцията <strong>„Оценяван имот"</strong> на страница Сравними се попълват:
+  заглавие на доклада, адрес, град, площ, етаж, общо етажи, тип строителство, година на строеж
+  и дата на оценката. Тези данни се включват директно в Word доклада.</p>
 
-  <h3>Корекции (%)</h3>
-  <p>За всяка обява може да въведете корекционен процент (напр. <code>-5</code> за по-лошо местоположение
-  или <code>+3</code> за по-добро изложение) и аналитична бележка.
-  Колоната <em>Кор.ц/кв.м</em> показва: <code>цена/кв.м × (1 + корекция% / 100)</code>.</p>
+  <h3>Закачени стойности (заключителна таблица)</h3>
+  <p>Word докладът съдържа заключителна таблица с всички закачени стойности:</p>
+  <ul style="font-size:0.88rem;line-height:1.7;padding-left:1.2rem;margin-bottom:0.5rem">
+    <li><strong>Пазарен подход</strong>: медианата от корекционните цени на пинатите сравними</li>
+    <li><strong>Доходен подход</strong>: <code>concluded_value_income</code> (ако е закачен)</li>
+    <li><strong>Остатъчен метод</strong>: <code>concluded_value_residual</code> (ако е закачен)</li>
+  </ul>
 
-  <h3>Excel експорт</h3>
-  <p>Бутонът <strong>⬇ Excel</strong> генерира стилизиран <code>.xlsx</code> файл с два worksheet-а:
-  <em>Продажни сравними</em> и <em>Наемни сравними</em>. Включва статистиките,
-  всички обяви от пула (пинатите са оцветени в зелено, оценяваният обект — в жълто)
-  и auto-width на колоните.</p>
+  <div class="help-callout">
+    <strong>Нов доклад:</strong> Бутонът „Нов доклад" запазва текущия draft в историята и създава
+    нов празен draft. Сравнителният пул се изчиства. Действието е необратимо —
+    системата иска потвърждение преди изпълнение.
+  </div>
 </section>
 
-<!-- ═══ 5. Geo ════════════════════════════════════════════════════════════════ -->
+<!-- ═══ 8. Статистики ════════════════════════════════════════════════════════ -->
+<section class="help-section" id="analytics">
+  <h2>8. Пазарни статистики</h2>
+
+  <p>Страницата <strong>Статистики</strong> показва хронологичния пазарен тренд на база данните
+  от всички засичания. Данните идват от материализиран изглед (<code>mv_analytics_flat</code>),
+  агрегиран по засичане, тип сделка, географска категория, град и тип имот.</p>
+
+  <h3>KPI карти (последно засичане)</h3>
+  <table class="help-table">
+    <thead><tr><th>KPI</th><th>Значение</th></tr></thead>
+    <tbody>
+      <tr><td>Медиана EUR/кв.м</td><td>50-ти персентил на цена/кв.м за избраната комбинация при последното засичане</td></tr>
+      <tr><td>Обяви</td><td>Брой уникални обяви при последното засичане и текущите филтри</td></tr>
+      <tr><td>Медиана DOM</td><td>Медиана на Days on Market — брой дни от публикуване до момента на засичане</td></tr>
+      <tr><td>P25 / P75</td><td>Интерквартилен диапазон при последното засичане</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Графики</h3>
+  <table class="help-table">
+    <thead><tr><th>Графика</th><th>Тип</th><th>Какво показва</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Брой обяви по засичане</td>
+        <td>Bar chart</td>
+        <td>Динамика на предлагането — расте ли броят на обявите между засичанията?</td>
+      </tr>
+      <tr>
+        <td>Медиана дни на пазара (DOM)</td>
+        <td>Line chart</td>
+        <td>Ликвидност на пазара — по-малко дни = по-бързи продажби = по-горещ пазар</td>
+      </tr>
+      <tr>
+        <td>Медиана EUR/кв.м (с IQR лента)</td>
+        <td>Line chart + fill band</td>
+        <td>Ценови тренд — медианата (синя линия), средното (пунктирана) и P25–P75 диапазон (лента)</td>
+      </tr>
+      <tr>
+        <td>Повтарящи се обяви — ценови промени</td>
+        <td>Stacked bar</td>
+        <td>Обяви, намалили / запазили / увеличили цената между две последователни засичания</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="help-callout help-callout--info">
+    <strong>Days on Market (DOM)</strong> се изчислява като: <code>дата_на_засичане − published_date</code>.
+    DOM измерва колко дни обявата е видима на пазара — косвен индикатор за ликвидност и баланс
+    между търсене и предлагане. Нарастващ DOM при стабилни цени сигнализира за отслабващо търсене.
+  </div>
+
+  <h3>Материализиран изглед</h3>
+  <p>Аналитичните данни се пресмятат чрез PostgreSQL materialized view <code>mv_analytics_flat</code>,
+  обновяван след всяко засичане или ръчно от администратор (бутон „Обнови аналитичен изглед").
+  Използва <code>REFRESH MATERIALIZED VIEW CONCURRENTLY</code> — без блокиране на четенията.</p>
+</section>
+
+<!-- ═══ 9. Geo ════════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="geo">
-  <h2>🗺️ 5. Географски категории (geo_category)</h2>
+  <h2>9. Географски категории (geo_category)</h2>
 
   <p>Всяка обява автоматично получава географска категория при feature engineering
-  на база йерархично правило по <code>location_level_1/2/3</code> и <code>title_city_model</code>:</p>
+  на база йерархично правило по <code>location_level_1/2/3</code> и <code>title_city_model</code>.
+  Категориите са проектирани да отразяват сегментацията на българския имотен пазар:</p>
 
   <table class="help-table">
-    <thead><tr><th>Категория</th><th>Описание</th></tr></thead>
+    <thead><tr><th>Категория</th><th>Обхват</th><th>Пазарна характеристика</th></tr></thead>
     <tbody>
-      <tr><td><code>sofia_center</code></td><td>Централни квартали на София (Лозенец, Изток, Младост 1 и др.)</td></tr>
-      <tr><td><code>sofia_other</code></td><td>Останалите квартали на София</td></tr>
-      <tr><td><code>large_regional_city</code></td><td>Пловдив, Варна, Бургас, Стара Загора, Русе</td></tr>
-      <tr><td><code>regional_city</code></td><td>Областни центрове (Плевен, Велико Търново, Сливен и др.)</td></tr>
-      <tr><td><code>small_city</code></td><td>Малки градове и общини</td></tr>
-      <tr><td><code>sea_resort</code></td><td>Черноморски курорти (Слънчев бряг, Св. Константин и др.)</td></tr>
-      <tr><td><code>mountain_resort</code></td><td>Планински курорти (Банско, Боровец, Пампорово)</td></tr>
-      <tr><td><code>foreign</code></td><td>Имоти в чужбина</td></tr>
-      <tr><td><code>other_unknown</code></td><td>Не попадат в нито една категория</td></tr>
+      <tr>
+        <td><code>sofia_center</code></td>
+        <td>Централни и престижни квартали на София: Лозенец, Изток, Младост 1, Иван Вазов, Докторски паметник и др.</td>
+        <td>Най-висок ценови диапазон в страната; нисък DOM; висока ликвидност</td>
+      </tr>
+      <tr>
+        <td><code>sofia_other</code></td>
+        <td>Останалите квартали на София (Люлин, Дружба, Надежда, Слатина и др.)</td>
+        <td>По-широк ценови диапазон; по-висок DOM от centrum; различна ликвидност по квартали</td>
+      </tr>
+      <tr>
+        <td><code>large_regional_city</code></td>
+        <td>Пловдив, Варна, Бургас, Стара Загора, Русе</td>
+        <td>Вторичен пазар с висока активност; цените са 50–70% от Сф. центъра</td>
+      </tr>
+      <tr>
+        <td><code>regional_city</code></td>
+        <td>Областни центрове: Плевен, В. Търново, Сливен, Шумен, Добрич, Враца и др.</td>
+        <td>По-ниска ликвидност; силно зависим от местната икономика</td>
+      </tr>
+      <tr>
+        <td><code>small_city</code></td>
+        <td>Малки градове и общини извън горните категории</td>
+        <td>Слаба ликвидност; висок DOM; ниска ценова плътност</td>
+      </tr>
+      <tr>
+        <td><code>sea_resort</code></td>
+        <td>Черноморски курорти: Слънчев бряг, Св. Константин, Несебър, Созопол, Поморие и др.</td>
+        <td>Силно сезонен пазар; висок дял от чуждестранни купувачи; ниска целогодишна ликвидност</td>
+      </tr>
+      <tr>
+        <td><code>mountain_resort</code></td>
+        <td>Планински курорти: Банско, Боровец, Пампорово, Чепеларе</td>
+        <td>Нишов пазар; ценовата динамика следва туристическото търсене</td>
+      </tr>
+      <tr>
+        <td><code>foreign</code></td>
+        <td>Имоти в чужбина (рекламирани в imot.bg)</td>
+        <td>Изключват се от националните пазарни анализи</td>
+      </tr>
+      <tr>
+        <td><code>other_unknown</code></td>
+        <td>Не попадат в нито една категория</td>
+        <td>Проверете данните за местоположение; вероятно некласифицирано населено място</td>
+      </tr>
     </tbody>
   </table>
 </section>
 
-<!-- ═══ 6. Feature Engineering ═══════════════════════════════════════════════ -->
+<!-- ═══ 10. Feature Engineering ═══════════════════════════════════════════════ -->
 <section class="help-section" id="feature-eng">
-  <h2>🛠️ 6. Feature Engineering</h2>
+  <h2>10. Обработка на данните (Feature Engineering)</h2>
 
   <p>Функцията <code>engineer_features()</code> се извиква за всеки ред преди запис в БД.
   Кодът е в <code>utils/feature_engineering/feature_engineering_utils.py</code>
-  и се споделя между notebooks и приложението.</p>
+  и се споделя между notebooks и приложението — гарантира консистентност.</p>
 
   <table class="help-table">
-    <thead><tr><th>Поле</th><th>Логика</th></tr></thead>
+    <thead><tr><th>Поле</th><th>Трансформация</th></tr></thead>
     <tbody>
       <tr>
         <td><code>deal_type_normalized</code></td>
@@ -316,58 +1014,61 @@
       </tr>
       <tr>
         <td><code>published_date</code></td>
-        <td>Парсира "31 яну, 2014" → <code>date(2014, 1, 31)</code></td>
+        <td>Парсира BGR дати: "31 яну, 2014" → <code>date(2014, 1, 31)</code>. NULL при неразпознат формат.</td>
       </tr>
       <tr>
         <td><code>area_sqm_model</code></td>
-        <td>За ЗЕМЕДЕЛСКА ЗЕМЯ с площ ≤ 500 → умножава по 1000 (декари → кв.м)</td>
+        <td>За ЗЕМЕДЕЛСКА ЗЕМЯ с площ ≤ 500: умножава по 1000 (декари → кв.м). Иначе запазва оригиналната стойност.</td>
       </tr>
       <tr>
         <td><code>price_per_sqm_model</code></td>
-        <td><code>total_price / area_sqm_model</code> — преизчислено, не от сайта</td>
+        <td><code>total_price / area_sqm_model</code> — преизчислено от системата, не копирано от imot.bg.
+        Гарантира консистентност при сравнение.</td>
       </tr>
       <tr>
         <td><code>title_city_model</code></td>
-        <td>Малки букви, премахнат префикс "гр. " / "с. " / "к.к. "</td>
+        <td>Малки букви, премахнат префикс "гр. " / "с. " / "к.к. ". Ползва се за филтриране по град.</td>
       </tr>
       <tr>
         <td><code>property_type_slug</code></td>
-        <td>Извлечен от URL-а: <code>/prodava-dvustaen/</code> → <code>dvustaen</code></td>
+        <td>Извлечен от URL-а: <code>/prodava-dvustaen/</code> → <code>dvustaen</code>.</td>
       </tr>
       <tr>
         <td><code>geo_category</code></td>
-        <td>Йерархично правило по <code>location_level_1/2/3</code> и <code>title_city_model</code></td>
+        <td>Йерархично правило по <code>location_level_1/2/3</code> и <code>title_city_model</code>.
+        Вижте <a href="#geo">Секция 9</a>.</td>
       </tr>
       <tr>
         <td><code>construction_type_model</code></td>
-        <td>За парцели/земи → <code>not_applicable_land</code>; невалидни години → NULL</td>
+        <td>За парцели/земи → <code>not_applicable_land</code>; невалидни типове → NULL.</td>
       </tr>
       <tr>
         <td><code>floor_model</code></td>
-        <td>За небuildng типове → NULL; <code>floor_applicability</code> обяснява причината</td>
+        <td>За имоти без приложимост на „етаж" (парцели, земеделска земя) → NULL;
+        <code>floor_applicability</code> обяснява причината.</td>
       </tr>
     </tbody>
   </table>
 </section>
 
-<!-- ═══ 7. ML модел ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 11. ML модел ══════════════════════════════════════════════════════════ -->
 <section class="help-section" id="ml">
-  <h2>🤖 7. ML модел (LightGBM) — статус</h2>
+  <h2>11. ML модел (LightGBM)</h2>
 
   <p>Системата включва регресионен модел (LightGBM), трениран да предсказва
-  <code>price_per_sqm</code> (цена на квадратен метър в EUR) на база характеристиките на имота.
+  <code>price_per_sqm</code> (цена/кв.м в EUR) на база характеристиките на имота.
   Моделът е разработен в <em>Notebook 04</em> и е базиран на ~165 000 обяви от историческия dataset.</p>
 
   <h3>Входни характеристики</h3>
   <table class="help-table">
     <thead><tr><th>Характеристика</th><th>Поле</th><th>Тип</th></tr></thead>
     <tbody>
-      <tr><td>Тип имот</td><td><code>property_type_slug</code></td><td>категориен</td></tr>
-      <tr><td>Географска категория</td><td><code>geo_category</code></td><td>категориен</td></tr>
-      <tr><td>Площ</td><td><code>area_sqm_model</code></td><td>числов</td></tr>
-      <tr><td>Етаж</td><td><code>floor_model</code></td><td>числов</td></tr>
-      <tr><td>Тип конструкция</td><td><code>construction_type_model</code></td><td>категориен</td></tr>
-      <tr><td>Година на строеж</td><td><code>construction_year_model</code></td><td>числов</td></tr>
+      <tr><td>Тип имот</td><td><code>property_type_slug</code></td><td>Категориен</td></tr>
+      <tr><td>Географска категория</td><td><code>geo_category</code></td><td>Категориен</td></tr>
+      <tr><td>Площ</td><td><code>area_sqm_model</code></td><td>Числов</td></tr>
+      <tr><td>Етаж</td><td><code>floor_model</code></td><td>Числов</td></tr>
+      <tr><td>Тип конструкция</td><td><code>construction_type_model</code></td><td>Категориен</td></tr>
+      <tr><td>Година на строеж</td><td><code>construction_year_model</code></td><td>Числов</td></tr>
     </tbody>
   </table>
 
@@ -381,15 +1082,15 @@
 
   <div class="help-callout">
     <strong>Текущ статус:</strong> Моделът в момента <em>не е интегриран в приложението</em>.
-    Оценките се базират на пазарен сравнителен анализ (comparable pool), не на ML предсказание.
+    Оценките се базират на пазарен сравнителен анализ (comparable pool) и доходните методи.
     Планирано развитие: автоматично пре-трениране след всяко засичане, SHAP explainability
     в докладите, API endpoint за директно scoring на нова обява.
   </div>
 </section>
 
-<!-- ═══ 8. DB схема ════════════════════════════════════════════════════════════ -->
+<!-- ═══ 12. DB схема ══════════════════════════════════════════════════════════ -->
 <section class="help-section" id="db-schema">
-  <h2>🗄️ 8. Схема на базата данни</h2>
+  <h2>12. Схема на базата данни</h2>
 
   <table class="help-table">
     <thead><tr><th>Таблица</th><th>Предназначение</th><th>Ключове</th></tr></thead>
@@ -411,22 +1112,22 @@
       </tr>
       <tr>
         <td><code>comparable_pool</code></td>
-        <td>Анализен пул; <code>pinned_for_report</code> маркира включените в доклада (max 6)</td>
+        <td>Анализен пул на активния доклад; <code>pinned_for_report</code> маркира включените (max 6)</td>
         <td>UNIQUE: (listing_id, comparable_type)</td>
       </tr>
       <tr>
         <td><code>appraisal_reports</code></td>
-        <td>Докладите (draft/generated) и данните за оценявания имот</td>
+        <td>Докладите (draft/finalized) с данните за оценявания имот и закачените стойности</td>
         <td>PK: UUID</td>
       </tr>
       <tr>
         <td><code>report_comparables</code></td>
-        <td>Legacy — финалните сравними за Word/PDF таблица (позиции 1–6)</td>
+        <td>Финалните сравними за Word/PDF таблица (позиции 1–6)</td>
         <td>FK: report_id, listing_id</td>
       </tr>
       <tr>
         <td><code>taxonomy_property_types</code></td>
-        <td>22 канонични типа имот от imot.bg sitemap с Bulgarian display names</td>
+        <td>22 канонични типа имот от imot.bg sitemap с български display names</td>
         <td>PK: slug</td>
       </tr>
       <tr>
@@ -444,9 +1145,9 @@
   </div>
 </section>
 
-<!-- ═══ 9. FAQ ════════════════════════════════════════════════════════════════ -->
+<!-- ═══ 13. FAQ ═══════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="faq">
-  <h2>❓ 9. Типични въпроси</h2>
+  <h2>13. Типични въпроси</h2>
 
   <div class="faq-list">
 
@@ -454,8 +1155,8 @@
       <summary>Колко дълго трае едно пълно засичане?</summary>
       <div class="faq-body">
         При пълно национално покритие (~5 500 маршрута, ~165 000 обяви) процесът отнема приблизително
-        <strong>6–8 часа</strong>. Препоръчва се да се стартира вечерта и да се остави да приключи
-        за нощта. Процесът е независим от браузъра или уеб сървъра — може да затворите страницата.
+        <strong>6–8 часа</strong>. Препоръчва се да се стартира вечерта. Процесът е независим от
+        браузъра или уеб сървъра — може да затворите страницата.
       </div>
     </details>
 
@@ -473,14 +1174,49 @@
       <summary>Защо числата в началната страница, историята и търсенето са различни?</summary>
       <div class="faq-body">
         Трите брояча мерят различни неща — вижте <a href="#numbers">Секция 1</a> за пълно обяснение.
-        Накратко: <em>listings_upserted</em> брои всички записани редове включително тези с грешни данни;
+        Накратко: <em>listings_upserted</em> брои всички записани редове;
         броят в началната страница изисква разпознат <code>deal_type_normalized</code>;
         търсачката изисква допълнително валидна цена <em>и</em> площ.
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>Какво означава "archived" статус на обява?</summary>
+      <summary>Цената/кв.м в приложението съответства ли на посочената на imot.bg?</summary>
+      <div class="faq-body">
+        Не задължително. <code>price_per_sqm_model</code> се изчислява от системата като
+        <code>total_price / area_sqm_model</code> — преизчислена стойност, не копирана от сайта.
+        За земеделска земя площта се конвертира от декари в кв.м преди деленето.
+        Така се гарантира консистентност между всички обяви.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Каква трябва да е Cap Rate при доходния подход?</summary>
+      <div class="faq-body">
+        Cap Rate се извлича от пазарни трансакции — не се задава произволно.
+        Ако имате продажни и наемни данни в системата, можете да изчислите пазарния Cap Rate директно:
+        <strong>Cap Rate = NOI / Пазарна цена</strong>. Използвайте медианата от наемния пул за NOI
+        и медианата от продажния пул за пазарната цена — системата показва сравнение автоматично.
+        Алтернативно — ориентирайте се по публикувани проучвания на CBRE, Colliers или БНБ.
+        За жилищни имоти в София Cap Rate обичайно е 3–6% (2024–2025).
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Какво включват „Строителни разходи (EUR/кв.м РЗП)" в остатъчния метод?</summary>
+      <div class="faq-body">
+        Строителните разходи покриват всички <strong>директни разходи за строителство</strong>:
+        груб строеж (конструкция, кофраж, армировка), ограждащи конструкции, дограма, покрив,
+        вътрешни довършителни работи (мазилки, замазки, облицовки),
+        ВиК инсталация, електрическа инсталация, ОВИК (отопление, вентилация, климатизация),
+        асансьор. <em>Не включват</em>: проектиране, надзор, административни такси, маркетинг, финансиране.
+        За ориентир — Национален съюз на строителите в България (НСССО) публикува периодично
+        ориентировъчни стойности по видове строителство.
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Какво означава „archived" статус на обява?</summary>
       <div class="faq-body">
         Обява се архивира автоматично след <strong>пълно</strong> национално засичане
         (без избрани конкретни региони), ако не е намерена в текущия run.
@@ -508,22 +1244,24 @@
     </details>
 
     <details class="faq-item">
-      <summary>Цената/кв.м в приложението съответства ли на посочената на imot.bg?</summary>
+      <summary>Има ли вградена ML оценка на имот?</summary>
       <div class="faq-body">
-        Не задължително. <code>price_per_sqm_model</code> се изчислява от системата като
-        <code>total_price / area_sqm_model</code> — преизчислена стойност, не изтеглена от сайта.
-        За земеделска земя площта се конвертира от декари в кв.м преди деленето.
-        Така се гарантира консистентност между всички обяви.
+        В момента — не. Оценките се базират изцяло на сравнителен пазарен анализ и доходните методи.
+        Системата включва обучен LightGBM модел (вижте <a href="#ml">Секция 11</a>),
+        но той все още не е интегриран в уеб интерфейса.
+        Интеграцията е планирана за следваща фаза на развитие.
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>Има ли вградена ML оценка на имот?</summary>
+      <summary>Как да интерпретирам таблицата за чувствителност при остатъчния метод?</summary>
       <div class="faq-body">
-        В момента — не. Оценките се базират изцяло на сравнителен пазарен анализ (comparable pool).
-        Системата включва обучен LightGBM модел (вижте <a href="#ml">Секция 7</a>),
-        но той все още не е интегриран в уеб интерфейса.
-        Интеграцията е планирана за следваща фаза на развитие.
+        Таблицата показва RLV/кв.м парцел при различни комбинации на строителни разходи (±20%) и
+        продажни цени (Q25–Q75 от пула). <strong>Тъмно зелено = висока положителна RLV</strong> (добре);
+        <strong>тъмно червено = силно отрицателна RLV</strong> (нежизнеспособен при тези параметри).
+        Контурирана клетка = базов сценарий. Ако повечето от клетките са зелени — проектът е
+        устойчив на вариациите. Ако само 1–2 клетки са зелени — проектът е маргинален
+        и изисква консервативен подход.
       </div>
     </details>
 

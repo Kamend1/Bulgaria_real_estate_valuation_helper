@@ -504,6 +504,17 @@ def run_scrape_background(
                 run_row.listings_found = progress_run.listings_total
                 run_row.listings_upserted = upserted
 
+        # 8. Analytics: detect price events + refresh materialized view
+        try:
+            from app.services.analytics_service import compute_price_events, refresh_mv
+            progress_run.push("log", {"message": "Изчисляване на ценови промени…"})
+            n_events = compute_price_events(db_run_id)
+            progress_run.push("log", {"message": f"Ценови събития: {n_events}. Обновяване на аналитичен изглед…"})
+            refresh_mv()
+            progress_run.push("log", {"message": "Аналитичният изглед е обновен."})
+        except Exception as _ae:
+            progress_run.push("log", {"message": f"Предупреждение: аналитиката не се обнови ({_ae})"})
+
         progress_run.status = "completed"
         progress_run.finished_at = datetime.utcnow()
         progress_run.push("done", progress_run.to_dict())

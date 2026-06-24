@@ -10,7 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import settings
 from app.db.models import User
 from app.db.session import get_db, db_session
-from app.routers import comparables, listings, reports, scrape
+from app.routers import analytics, comparables, listings, reports, scrape
 from app.routers import auth as auth_router
 from app.routers import admin as admin_router
 from app.templating import templates
@@ -69,6 +69,7 @@ app.include_router(scrape.router)
 app.include_router(listings.router)
 app.include_router(comparables.router)
 app.include_router(reports.router)
+app.include_router(analytics.router)
 
 
 @app.exception_handler(401)

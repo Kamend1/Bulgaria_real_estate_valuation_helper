@@ -200,6 +200,7 @@ class AppraisalReport(Base):
     gross_rent_multiplier = Column(Numeric(6, 3))
     capitalization_rate = Column(Numeric(6, 4))
     concluded_value_income = Column(Numeric(14, 2))
+    concluded_value_residual = Column(Numeric(14, 2))
 
     concluded_value = Column(Numeric(14, 2))
     concluded_currency = Column(String(5), default="EUR")

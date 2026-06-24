@@ -2,6 +2,7 @@
    CSS Reset & Base
    ============================ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+img { max-width: 100%; height: auto; display: block; }
 
 :root {
   --brand: #2563eb;
@@ -32,36 +33,63 @@ body {
   display: flex;
   align-items: center;
   gap: 2rem;
-  padding: 0.75rem 2rem;
-  background: var(--brand);
+  padding: 0 2rem;
+  height: 54px;
+  background: #1e3a5f;
   color: #fff;
-  box-shadow: 0 2px 4px rgb(0 0 0 / 0.1);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.06), 0 4px 16px rgb(0 0 0 / 0.18);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+/* Logo mark in navbar (dark background — invert to white) */
+.nav-logo-icon {
+  height: 28px;
+  width: auto;
+  max-width: 120px;
+  flex-shrink: 0;
+  display: block;
+  filter: brightness(0) invert(1);
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
   color: #fff;
   text-decoration: none;
   white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
 }
 
 .nav-links {
   display: flex;
-  gap: 1.5rem;
+  gap: 0.25rem;
   list-style: none;
 }
 
 .nav-links a {
-  color: rgba(255,255,255,0.88);
+  color: rgba(255,255,255,0.75);
   text-decoration: none;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   font-weight: 500;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
 }
 
-.nav-links a:hover { color: #fff; text-decoration: underline; }
-.nav-active { color: #fff !important; font-weight: 700; border-bottom: 2px solid #fff; }
-.nav-disabled { color: rgba(255,255,255,0.4) !important; cursor: default; pointer-events: none; }
+.nav-links a:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.nav-active { color: #fff !important; font-weight: 600; background: rgba(255,255,255,0.12) !important; }
+.nav-disabled { color: rgba(255,255,255,0.35) !important; cursor: default; pointer-events: none; }
 
 /* ============================
    Layout
@@ -72,15 +100,7 @@ body {
   padding: 2rem 1.5rem;
 }
 
-footer.site-footer {
-  background: #0f2942;
-  color: rgba(255,255,255,0.75);
-  border-top: none;
-  margin-top: 4rem;
-  padding: 0;
-  text-align: left;
-  font-size: 1rem;
-}
+/* footer.site-footer — full definition below in "Site Footer" section */
 
 h1 { font-size: 1.6rem; margin-bottom: 1.25rem; }
 h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
@@ -593,8 +613,8 @@ body.page-listings .container {
 .btn-tiny:hover { background: var(--brand); color: #fff; }
 .btn-remove { padding: 0.2rem 0.45rem; font-size: 0.78rem; border: none; border-radius: 4px; cursor: pointer; background: #fee2e2; color: var(--error); }
 .btn-remove:hover { background: var(--error); color: #fff; }
-.btn-danger { padding: 0.45rem 0.9rem; background: #fee2e2; color: var(--error); border: 1px solid #fca5a5; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
-.btn-danger:hover { background: var(--error); color: #fff; }
+.btn-danger { padding: 0.45rem 0.9rem; background: #ef4444; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+.btn-danger:hover { background: #dc2626; }
 
 /* ============================
    Home page
@@ -998,106 +1018,162 @@ body.page-listings .container {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.35rem 2rem;
-  background: #0f2942;
-  font-size: 0.78rem;
-  color: rgba(255,255,255,0.6);
-  border-bottom: 1px solid #1a3a5c;
+  padding: 0 2rem;
+  height: 32px;
+  background: #0a1e35;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.5);
+}
+
+.brand-strip-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.brand-strip-logo {
+  height: 16px;
+  width: auto;
+  max-width: 80px;
+  flex-shrink: 0;
+  display: block;
+  filter: brightness(0) invert(1);
+  opacity: 0.8;
 }
 
 .brand-strip-name {
   font-weight: 700;
-  color: #fff;
+  color: rgba(255,255,255,0.85);
   text-decoration: none;
   letter-spacing: 0.02em;
+  transition: color 0.15s;
 }
-.brand-strip-name:hover { text-decoration: underline; }
+.brand-strip-name:hover { color: #fff; }
 
-.brand-strip-tagline { color: rgba(255,255,255,0.45); margin-left: 0.25rem; }
+.brand-strip-sep {
+  color: rgba(255,255,255,0.2);
+  margin: 0 0.1rem;
+}
+
+.brand-strip-tagline {
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 0.01em;
+}
 
 .brand-strip-links {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 .brand-strip-links a {
-  color: rgba(255,255,255,0.65);
+  color: rgba(255,255,255,0.5);
   text-decoration: none;
   transition: color 0.15s;
+  display: flex;
+  align-items: center;
 }
-.brand-strip-links a:hover { color: #fff; }
+.brand-strip-links a:hover { color: rgba(255,255,255,0.9); }
 
-.brand-strip-linkedin { font-weight: 600; color: rgba(255,255,255,0.85) !important; }
+.brand-strip-linkedin {
+  color: rgba(255,255,255,0.7) !important;
+  font-weight: 600;
+}
 
 /* Brand sub-label inside navbar */
 .brand-sub {
-  display: block;
-  font-size: 0.62rem;
+  font-size: 0.65rem;
   font-weight: 400;
-  color: rgba(255,255,255,0.55);
-  letter-spacing: 0.01em;
-  margin-top: -1px;
-  text-decoration: none;
+  color: rgba(255,255,255,0.45);
+  letter-spacing: 0.02em;
+  margin-top: 1px;
 }
-.brand-sub:hover { color: rgba(255,255,255,0.85); }
 
 /* ============================
    Site Footer — 3-column
    ============================ */
+footer.site-footer {
+  background: #0d2137;
+  color: rgba(255,255,255,0.65);
+  border-top: none;
+  margin-top: 5rem;
+  padding: 0;
+  text-align: left;
+  font-size: 1rem;
+}
+
 .footer-main {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 2.5rem 2rem 2rem;
+  padding: 3rem 2rem 2rem;
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
-  gap: 2.5rem;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  gap: 3rem;
+}
+
+.footer-brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  margin-bottom: 0.85rem;
+}
+
+.footer-logo-icon {
+  height: 24px;
+  width: auto;
+  max-width: 110px;
+  flex-shrink: 0;
+  display: block;
+  filter: brightness(0) invert(1);
+  opacity: 0.75;
 }
 
 .footer-brand-name {
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 700;
   color: #fff;
-  margin-bottom: 0.5rem;
   letter-spacing: 0.02em;
 }
 
 .footer-tagline {
-  font-size: 0.8rem;
-  color: rgba(255,255,255,0.5);
-  line-height: 1.65;
-  margin-bottom: 1.1rem;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.38);
+  line-height: 1.7;
+  margin-bottom: 1.25rem;
 }
 
 .footer-linkedin {
-  display: inline-block;
-  padding: 0.3rem 0.9rem;
-  border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 5px;
-  color: rgba(255,255,255,0.75);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.85rem;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  color: rgba(255,255,255,0.6);
   text-decoration: none;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
 }
-.footer-linkedin:hover { border-color: #fff; color: #fff; }
+.footer-linkedin:hover { border-color: rgba(255,255,255,0.4); color: #fff; background: rgba(255,255,255,0.05); }
+
+.footer-li-icon { width: 14px; height: 14px; opacity: 0.8; flex-shrink: 0; }
 
 .footer-col-title {
-  font-size: 0.7rem;
+  font-size: 0.67rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: rgba(255,255,255,0.4);
-  margin-bottom: 0.85rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid #1a3a5c;
+  letter-spacing: 0.1em;
+  color: rgba(255,255,255,0.28);
+  margin-bottom: 1rem;
 }
 
 .footer-links { list-style: none; padding: 0; margin: 0 0 1rem; }
-.footer-links li { margin-bottom: 0.45rem; }
+.footer-links li { margin-bottom: 0.5rem; }
 .footer-links a {
-  color: rgba(255,255,255,0.6);
+  color: rgba(255,255,255,0.52);
   text-decoration: none;
-  font-size: 0.85rem;
+  font-size: 0.83rem;
   transition: color 0.15s;
 }
 .footer-links a:hover { color: #fff; }
@@ -1105,37 +1181,77 @@ body.page-listings .container {
 .footer-website-btn {
   display: inline-block;
   margin-top: 0.5rem;
-  padding: 0.35rem 0.9rem;
-  background: var(--brand);
+  padding: 0.32rem 0.85rem;
+  background: rgba(37,99,235,0.75);
   color: #fff;
-  border-radius: 5px;
-  font-size: 0.8rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
   font-weight: 600;
   text-decoration: none;
   transition: background 0.15s;
 }
-.footer-website-btn:hover { background: var(--brand-dark); }
+.footer-website-btn:hover { background: var(--brand); }
 
+/* КНОБ legal notice */
+.footer-knob {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem 2rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.footer-knob-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  color: rgba(255,255,255,0.25);
+}
+
+.footer-knob p {
+  font-size: 0.71rem;
+  color: rgba(255,255,255,0.3);
+  line-height: 1.65;
+  margin: 0;
+}
+
+.footer-knob p strong {
+  color: rgba(255,255,255,0.48);
+  font-weight: 600;
+}
+
+/* Bottom bar */
 .footer-bottom {
-  border-top: 1px solid #1a3a5c;
+  border-top: 1px solid rgba(255,255,255,0.06);
   padding: 0.85rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.75rem;
-  color: rgba(255,255,255,0.38);
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.27);
 }
 
-.footer-legal { display: flex; gap: 0.75rem; align-items: center; }
-.footer-legal a { color: rgba(255,255,255,0.38); text-decoration: none; transition: color 0.15s; }
-.footer-legal a:hover { color: rgba(255,255,255,0.7); }
+.footer-dot { color: rgba(255,255,255,0.15); }
+.footer-legal { display: flex; gap: 0.6rem; align-items: center; }
+.footer-legal a { color: rgba(255,255,255,0.27); text-decoration: none; transition: color 0.15s; }
+.footer-legal a:hover { color: rgba(255,255,255,0.65); }
+
+/* Navbar SVG icon helpers (replaces inline styles) */
+.nav-user-icon { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; opacity: 0.7; }
+.nav-li-icon   { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+.form-no-margin { margin: 0; }
 
 @media (max-width: 700px) {
-  .brand-strip { flex-direction: column; gap: 0.35rem; align-items: flex-start; padding: 0.5rem 1rem; }
+  .brand-strip { height: auto; flex-direction: column; gap: 0.3rem; align-items: flex-start; padding: 0.45rem 1rem; }
   .brand-strip-tagline { display: none; }
-  .brand-strip-links { gap: 0.75rem; }
-  .footer-main { grid-template-columns: 1fr; gap: 1.5rem; padding: 1.5rem 1rem 1rem; }
+  .brand-strip-links { gap: 0.75rem; flex-wrap: wrap; }
+  .navbar { padding: 0 1rem; gap: 1rem; }
+  .footer-main { grid-template-columns: 1fr; gap: 2rem; padding: 2rem 1rem 1rem; }
   .footer-bottom { flex-direction: column; gap: 0.4rem; text-align: center; padding: 0.85rem 1rem; }
+  .footer-knob { padding: 0.85rem 1rem; }
 }
 
 /* ============================
@@ -1194,6 +1310,7 @@ details.faq-item summary {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  -webkit-user-select: none;
   user-select: none;
   gap: 1rem;
 }
@@ -1620,3 +1737,108 @@ details.faq-item[open] summary { border-bottom: 1px solid var(--border); color: 
 }
 .btn-outline:hover { background: #eff6ff; }
 .btn-outline.btn-sm { padding: 0.22rem 0.55rem; font-size: 0.78rem; }
+
+/* ── Toolbar — page-level action bar ──────────────────────────────────────── */
+/*
+ * .toolbar is a flex strip for page-header actions.
+ * The overrides below use specificity 0-2-0 (.toolbar .btn-*) which beats both
+ * System-1 standalone .btn-primary (line ~150, has unwanted margin-top) and
+ * System-2 .btn modifier classes (line ~1450) — without touching either globally.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+/* Form wrappers must not break flex alignment */
+.toolbar form {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+/* Unified scale + reset for all btn variants inside a toolbar */
+.toolbar .btn,
+.toolbar .btn-primary,
+.toolbar .btn-outline,
+.toolbar .btn-danger {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+/* Ensure .btn.btn-primary (System-2 combo) in toolbar keeps brand colour */
+.toolbar .btn.btn-primary {
+  background: var(--brand);
+  color: #fff;
+  border: none;
+}
+.toolbar .btn.btn-primary:hover { background: var(--brand-dark); opacity: 1; }
+/* Danger → always solid red inside toolbar (kills System-1 pastel default) */
+.toolbar .btn-danger,
+.toolbar .btn.btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+}
+.toolbar .btn-danger:hover,
+.toolbar .btn.btn-danger:hover { background: #dc2626; opacity: 1; }
+
+/* Export buttons — self-contained; no .btn base needed */
+.btn-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.btn-export svg { flex-shrink: 0; width: 14px; height: 14px; }
+.btn-export--excel { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.btn-export--excel:hover { background: #dcfce7; border-color: #86efac; color: #166534; }
+.btn-export--word  { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.btn-export--word:hover  { background: #dbeafe; border-color: #93c5fd; color: #1e40af; }
+
+/* ── Approach save bar (income / residual panels) ──────────────────────────── */
+.approach-save-bar {
+  border-top: 1px solid var(--border);
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.approach-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+.approach-saved-notice {
+  font-size: 0.82rem;
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  display: inline-block;
+}
+

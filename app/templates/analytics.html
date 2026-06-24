@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+{% block title %}Статистики — Дигитален асистент на имотния оценител{% endblock %}
+
+{% block extra_css %}
+<style>
+  .analytics-header {
+    margin-bottom: 1.5rem;
+  }
+  .analytics-header h1 {
+    margin-bottom: 0.25rem;
+  }
+
+  /* Filter card */
+  .filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.75rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .filter-group label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.3rem;
+  }
+  .filter-group select {
+    margin-top: 0;
+  }
+  .filter-actions {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+    padding-top: 1.6rem;
+  }
+  .btn-reset {
+    padding: 0.45rem 0.9rem;
+    font-size: 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    line-height: 1.6;
+  }
+  .btn-reset:hover { background: #f1f5f9; color: var(--text); }
+
+  /* KPI row */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .kpi-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+  }
+  .kpi-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.35rem;
+  }
+  .kpi-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.1;
+  }
+  .kpi-unit {
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-weight: 400;
+    margin-top: 0.2rem;
+  }
+  .kpi-card.accent { border-left: 3px solid var(--brand); }
+
+  /* Chart cards */
+  .chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  @media (max-width: 780px) {
+    .chart-grid { grid-template-columns: 1fr; }
+    .filter-grid { grid-template-columns: 1fr 1fr; }
+  }
+  .chart-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+  }
+  .chart-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.75rem;
+  }
+  .chart-full {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--muted);
+  }
+  .empty-state p { margin-top: 0.5rem; font-size: 0.9rem; }
+
+  /* Admin refresh */
+  .admin-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .btn-admin-refresh {
+    padding: 0.3rem 0.75rem;
+    font-size: 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg);
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .btn-admin-refresh:hover { background: #f1f5f9; color: var(--text); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-header">
+  <h1>Статистики</h1>
+  <p class="hint">Хронологичен анализ на пазарни цени по засичания. Данните се обновяват автоматично след всяко ново засичане.</p>
+</div>
+
+{% if request.state.user and request.state.user.role == 'admin' %}
+<div class="admin-bar">
+  <span>Администраторски инструменти:</span>
+  <button class="btn-admin-refresh"
+          hx-post="/analytics/refresh-mv"
+          hx-target="#admin-msg"
+          hx-swap="innerHTML">
+    ↺ Обнови аналитичен изглед
+  </button>
+  <span id="admin-msg"></span>
+</div>
+{% endif %}
+
+<!-- ── Filters ──────────────────────────────────────────────────────────────── -->
+<section class="card">
+  <form method="get" action="/analytics/" id="filter-form">
+    <div class="filter-grid">
+
+      <div class="filter-group">
+        <label for="f-deal-type">Тип сделка</label>
+        <select name="deal_type" id="f-deal-type">
+          <option value="" {% if not f_deal_type %}selected{% endif %}>— Всички —</option>
+          <option value="sale" {% if f_deal_type == 'sale' %}selected{% endif %}>Продажби</option>
+          <option value="rent" {% if f_deal_type == 'rent' %}selected{% endif %}>Наеми</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="f-geo-category">Регион</label>
+        <select name="geo_category" id="f-geo-category">
+          <option value="" {% if not f_geo_category %}selected{% endif %}>— Всички —</option>
+          {% for slug, label in geo_categories %}
+          <option value="{{ slug }}" {% if f_geo_category == slug %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="f-city">Град</label>
+        <select name="city" id="f-city"
+                hx-get="/analytics/filters/neighborhoods"
+                hx-target="#f-neighborhood"
+                hx-trigger="change"
+                hx-include="[name='city']">
+          <option value="" {% if not f_city %}selected{% endif %}>— Всички —</option>
+          {% for c in filter_opts.cities %}
+          <option value="{{ c }}" {% if f_city == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="f-neighborhood">Квартал</label>
+        <select name="neighborhood" id="f-neighborhood">
+          <option value="" {% if not f_neighborhood %}selected{% endif %}>— Всички квартали —</option>
+          {% for n in neighborhoods %}
+          <option value="{{ n }}" {% if f_neighborhood == n %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="f-prop-type">Тип имот</label>
+        <select name="property_type_slug" id="f-prop-type">
+          <option value="" {% if not f_property_type_slug %}selected{% endif %}>— Всички —</option>
+          {% for slug, name in filter_opts.property_types %}
+          <option value="{{ slug }}" {% if f_property_type_slug == slug %}selected{% endif %}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="f-n-runs">Брой периоди</label>
+        <select name="n_runs" id="f-n-runs">
+          {% for val, label in n_runs_options %}
+          <option value="{{ val }}" {% if f_n_runs == val|int %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-actions">
+        <button type="submit" class="btn-primary" style="margin-top:0">Приложи</button>
+        <a href="/analytics/" class="btn-reset">Изчисти</a>
+      </div>
+
+    </div>
+  </form>
+</section>
+
+{% if not trend_data %}
+<!-- ── Empty state ──────────────────────────────────────────────────────────── -->
+<div class="empty-state">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 1rem">
+    <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
+  </svg>
+  <p>Няма данни за избраните филтри.</p>
+  <p>Моля, извършете поне едно засичане и изчакайте то да завърши.</p>
+</div>
+
+{% else %}
+<!-- ── KPI row ───────────────────────────────────────────────────────────────── -->
+<div class="kpi-row">
+  <div class="kpi-card accent">
+    <div class="kpi-label">Медиана EUR/кв.м</div>
+    <div class="kpi-value">{{ "{:,.0f}".format(latest.median_ppsqm) if latest.median_ppsqm else "—" }}</div>
+    <div class="kpi-unit">последно засичане</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Обяви</div>
+    <div class="kpi-value">{{ "{:,}".format(latest.n_listings) if latest.n_listings else "—" }}</div>
+    <div class="kpi-unit">последно засичане</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Медиана DOM</div>
+    <div class="kpi-value">{{ latest.median_dom if latest.median_dom else "—" }}</div>
+    <div class="kpi-unit">дни на пазара</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">P25 / P75</div>
+    <div class="kpi-value" style="font-size:1.1rem">
+      {{ "{:,.0f}".format(latest.p25_ppsqm) if latest.p25_ppsqm else "—" }}
+      /
+      {{ "{:,.0f}".format(latest.p75_ppsqm) if latest.p75_ppsqm else "—" }}
+    </div>
+    <div class="kpi-unit">EUR/кв.м</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Засичане</div>
+    <div class="kpi-value" style="font-size:1rem">{{ latest.run_date or "—" }}</div>
+    <div class="kpi-unit">последна дата</div>
+  </div>
+</div>
+
+<!-- ── Charts row ────────────────────────────────────────────────────────────── -->
+<div class="chart-grid">
+  <div class="chart-card">
+    <div class="chart-title">Брой обяви по засичане</div>
+    <canvas id="chartSupply" height="180"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Медиана дни на пазара (DOM)</div>
+    <canvas id="chartDom" height="180"></canvas>
+  </div>
+</div>
+
+<div class="chart-full">
+  <div class="chart-title">Медиана EUR/кв.м във времето (с интерквартилен диапазон P25–P75)</div>
+  <canvas id="chartPrice" height="220"></canvas>
+</div>
+
+{% if repeat_data %}
+<div class="chart-full">
+  <div class="chart-title">Повтарящи се обяви — ценови промени по засичане</div>
+  <canvas id="chartRepeat" height="200"></canvas>
+</div>
+{% endif %}
+
+{% endif %}{# end if trend_data #}
+
+{% endblock %}
+
+{% block extra_js %}
+{% if trend_data %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const TREND  = {{ trend_json | safe }};
+const REPEAT = {{ repeat_json | safe }};
+
+const labels = TREND.map(r => r.run_date);
+
+const FONT = { family: "system-ui, -apple-system, sans-serif", size: 12 };
+Chart.defaults.font = FONT;
+Chart.defaults.color = "#64748b";
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  // ── 1. Supply chart ──────────────────────────────────────────────────────
+  new Chart(document.getElementById("chartSupply"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Брой обяви",
+        data: TREND.map(r => r.n_listings),
+        backgroundColor: "rgba(37, 99, 235, 0.65)",
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false } },
+        y: { beginAtZero: true, ticks: { precision: 0 } },
+      }
+    }
+  });
+
+  // ── 2. DOM chart ─────────────────────────────────────────────────────────
+  new Chart(document.getElementById("chartDom"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Медиана DOM (дни)",
+        data: TREND.map(r => r.median_dom),
+        borderColor: "#d97706",
+        backgroundColor: "rgba(217, 119, 6, 0.12)",
+        borderWidth: 2,
+        pointRadius: 4,
+        tension: 0.35,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false } },
+        y: { beginAtZero: true },
+      }
+    }
+  });
+
+  // ── 3. Price trend chart with P25–P75 band ───────────────────────────────
+  new Chart(document.getElementById("chartPrice"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "P75 EUR/кв.м",
+          data: TREND.map(r => r.p75_ppsqm),
+          borderColor: "transparent",
+          backgroundColor: "rgba(37, 99, 235, 0.10)",
+          pointRadius: 0,
+          fill: "+1",
+          tension: 0.35,
+        },
+        {
+          label: "P25 EUR/кв.м",
+          data: TREND.map(r => r.p25_ppsqm),
+          borderColor: "transparent",
+          backgroundColor: "rgba(37, 99, 235, 0.10)",
+          pointRadius: 0,
+          fill: false,
+          tension: 0.35,
+        },
+        {
+          label: "Медиана EUR/кв.м",
+          data: TREND.map(r => r.median_ppsqm),
+          borderColor: "#2563eb",
+          backgroundColor: "#2563eb",
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          fill: false,
+          tension: 0.35,
+        },
+        {
+          label: "Средна EUR/кв.м",
+          data: TREND.map(r => r.mean_ppsqm),
+          borderColor: "#94a3b8",
+          backgroundColor: "#94a3b8",
+          borderWidth: 1.5,
+          borderDash: [5, 4],
+          pointRadius: 2,
+          fill: false,
+          tension: 0.35,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "top", labels: { boxWidth: 12, padding: 16 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label + ": " +
+              (ctx.parsed.y != null ? ctx.parsed.y.toLocaleString("bg-BG") + " EUR" : "—")
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          ticks: {
+            callback: v => v.toLocaleString("bg-BG")
+          }
+        }
+      }
+    }
+  });
+
+  // ── 4. Repeat listings chart ─────────────────────────────────────────────
+  if (REPEAT.length && document.getElementById("chartRepeat")) {
+    new Chart(document.getElementById("chartRepeat"), {
+      type: "bar",
+      data: {
+        labels: REPEAT.map(r => r.run_date),
+        datasets: [
+          {
+            label: "Намалени цени",
+            data: REPEAT.map(r => r.n_reduced),
+            backgroundColor: "rgba(22, 163, 74, 0.75)",
+            borderRadius: 3,
+          },
+          {
+            label: "Стабилни",
+            data: REPEAT.map(r => r.n_stable),
+            backgroundColor: "rgba(100, 116, 139, 0.55)",
+            borderRadius: 3,
+          },
+          {
+            label: "Увеличени цени",
+            data: REPEAT.map(r => r.n_increased),
+            backgroundColor: "rgba(220, 38, 38, 0.65)",
+            borderRadius: 3,
+          },
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "top", labels: { boxWidth: 12, padding: 16 } },
+          tooltip: { mode: "index", intersect: false }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, ticks: { precision: 0 } },
+        }
+      }
+    });
+  }
+
+});
+</script>
+{% endif %}
+{% endblock %}
