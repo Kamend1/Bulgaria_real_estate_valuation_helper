@@ -368,6 +368,10 @@ uvicorn app.main:app --reload
 
 ---
 
-## License
+## Лиценз
 
-This project is proprietary software. All rights reserved. No use, copying, modification, distribution, or commercial exploitation is permitted without prior written permission.
+Този проект е публикуван само с демонстрационна и портфолио цел.
+
+Кодът, методологията, scraping логиката, структурата на базата данни, моделите и оценителските workflow-и са proprietary и не могат да бъдат копирани, модифицирани, използвани, хоствани или комерсиализирани без предварително писмено разрешение.
+
+Вижте [LICENSE](LICENSE).
