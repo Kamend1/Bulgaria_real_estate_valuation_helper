@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.models import ScrapeRun
 from app.db.session import get_db, db_session
+from app.services.scrape_service import get_scrape_status
 from app.templating import templates
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
@@ -41,7 +42,11 @@ async def scrape_page(request: Request, db: Session = Depends(get_db)):
         .limit(20)
         .all()
     )
-    return templates.TemplateResponse(request, "scrape.html", {"recent_runs": recent_runs})
+    scrape_status = get_scrape_status(db)
+    return templates.TemplateResponse(request, "scrape.html", {
+        "recent_runs": recent_runs,
+        "scrape_status": scrape_status,
+    })
 
 
 @router.post("/start", response_class=HTMLResponse)
@@ -117,10 +122,11 @@ async def resume_scrape(
 
 
 @router.get("/progress_view/{run_id}", response_class=HTMLResponse)
-async def progress_view(request: Request, run_id: str):
+async def progress_view(request: Request, run_id: str, db: Session = Depends(get_db)):
     """Full page that wraps the SSE progress panel — used for resume and direct links."""
+    run = db.get(ScrapeRun, uuid.UUID(run_id))
     return templates.TemplateResponse(
-        request, "scrape_progress_page.html", {"run_id": run_id}
+        request, "scrape_progress_page.html", {"run_id": run_id, "run": run}
     )
 
 
@@ -206,7 +212,7 @@ async def progress_sse(run_id: str) -> StreamingResponse:
                 yield _sse("done", data)
                 break
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
     return StreamingResponse(
         event_stream(),

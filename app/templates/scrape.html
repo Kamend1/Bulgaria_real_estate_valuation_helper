@@ -1,8 +1,54 @@
 {% extends "base.html" %}
 {% block title %}Засичане — Дигитален асистент на имотния оценител{% endblock %}
 
+{% block extra_css %}
+<style>
+.data-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  border-left: 4px solid;
+  margin-bottom: 1.25rem;
+}
+.data-status-card.status-ok    { border-left-color: #10b981; background: #f0fdf4; }
+.data-status-card.status-warn  { border-left-color: #f59e0b; background: #fffbeb; }
+.data-status-card.status-error { border-left-color: #ef4444; background: #fef2f2; }
+@media (prefers-color-scheme: dark) {
+  .data-status-card.status-ok    { background: #052e16; }
+  .data-status-card.status-warn  { background: #1c1400; }
+  .data-status-card.status-error { background: #1c0000; }
+}
+.data-status-icon { font-size: 1.4rem; line-height: 1; flex-shrink: 0; margin-top: .1rem; }
+.data-status-label { font-weight: 600; font-size: .95rem; }
+.data-status-detail { font-size: .82rem; color: var(--text-muted); margin-top: .15rem; }
+</style>
+{% endblock %}
+
 {% block content %}
 <h1>Засичане на имот.бг</h1>
+
+{% if scrape_status %}
+<div class="data-status-card status-{{ scrape_status.recommendation_class }}">
+  <div class="data-status-icon">
+    {% if scrape_status.recommendation_class == 'ok' %}✅
+    {% elif scrape_status.recommendation_class == 'warn' %}⚠️
+    {% else %}❌{% endif %}
+  </div>
+  <div>
+    <div class="data-status-label">{{ scrape_status.recommendation_label }}</div>
+    <div class="data-status-detail">
+      {% if scrape_status.last_run %}
+        Последно засичане: {{ scrape_status.last_run.started_at.strftime('%d.%m.%Y') }} —
+        {{ scrape_status.active_listings | default(0) | int }} активни обяви в базата
+      {% else %}
+        Базата данни не съдържа данни от засичане
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <section class="card scrape-form-card">
   <h2>Тип сделка</h2>

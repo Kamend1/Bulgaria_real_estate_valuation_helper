@@ -1,7 +1,135 @@
 {% extends "base.html" %}
-{% block title %}Засичане в процес — Дигитален асистент на имотния оценител{% endblock %}
+{% block title %}Засичане{% if run %} — {{ run.status }}{% endif %} — Дигитален асистент на имотния оценител{% endblock %}
+
+{% block extra_css %}
+<style>
+.status-badge {
+  display: inline-block;
+  padding: .25rem .75rem;
+  border-radius: 999px;
+  font-size: .85rem;
+  font-weight: 600;
+}
+.status-badge.status-completed   { background: #d1fae5; color: #065f46; }
+.status-badge.status-failed      { background: #fee2e2; color: #991b1b; }
+.status-badge.status-interrupted { background: #fef3c7; color: #92400e; }
+@media (prefers-color-scheme: dark) {
+  .status-badge.status-completed   { background: #064e3b; color: #6ee7b7; }
+  .status-badge.status-failed      { background: #7f1d1d; color: #fca5a5; }
+  .status-badge.status-interrupted { background: #78350f; color: #fde68a; }
+}
+.run-meta-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.run-stats {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+.run-stats div { display: flex; flex-direction: column; }
+.run-stats dt {
+  font-size: .75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.run-stats dd {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0;
+}
+.run-last-msg {
+  margin-top: .75rem;
+  font-size: .9rem;
+  color: var(--text-muted);
+}
+.error-box {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  padding: .75rem 1rem;
+  font-size: .85rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: .75rem;
+  color: #991b1b;
+}
+.log-section-heading {
+  font-size: 1rem;
+  margin-bottom: .75rem;
+}
+.scrape-log-box {
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: .75rem 1rem;
+  font-size: .78rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 500px;
+  overflow-y: auto;
+}
+.run-actions {
+  margin-top: 1rem;
+}
+.run-actions form {
+  display: inline;
+  margin-left: .5rem;
+}
+.log-section {
+  margin-bottom: 1.5rem;
+}
+</style>
+{% endblock %}
 
 {% block content %}
-<h1>Засичане в процес</h1>
-{% include "scrape_progress.html" %}
+<h1>Засичане{% if run and run.status in ('completed', 'failed', 'interrupted') %} — завършено{% endif %}</h1>
+
+{% if run and run.status in ('completed', 'failed', 'interrupted') %}
+  {# ── Static view for terminal runs ── #}
+  <section class="card log-section">
+    <div class="run-meta-row">
+      <span class="status-badge status-{{ run.status }}">
+        {% if run.status == 'completed' %}✓ Завършено
+        {% elif run.status == 'failed' %}✗ Грешка
+        {% else %}⚠ Спряно{% endif %}
+      </span>
+      {% if run.started_at %}<span class="sub-text">Стартирано: {{ run.started_at.strftime('%d.%m.%Y %H:%M') }}</span>{% endif %}
+      {% if run.finished_at %}<span class="sub-text">Приключено: {{ run.finished_at.strftime('%d.%m.%Y %H:%M') }}</span>{% endif %}
+    </div>
+    <dl class="run-stats">
+      <div><dt>Маршрути</dt><dd>{{ run.routes_done or 0 }} / {{ run.routes_total or '?' }}</dd></div>
+      <div><dt>Обяви открити</dt><dd>{{ run.listings_found or 0 }}</dd></div>
+      <div><dt>Вписани в БД</dt><dd>{{ run.listings_ingested or run.listings_upserted or 0 }}</dd></div>
+    </dl>
+    {% if run.last_message %}<p class="run-last-msg">{{ run.last_message }}</p>{% endif %}
+    {% if run.error_message %}<pre class="error-box">{{ run.error_message }}</pre>{% endif %}
+  </section>
+
+  {% if run.log_text %}
+  <section class="card log-section">
+    <h2 class="log-section-heading">Пълен лог</h2>
+    <pre class="scrape-log-box">{{ run.log_text }}</pre>
+  </section>
+  {% endif %}
+
+  <div class="run-actions">
+    <a href="/scrape/" class="btn-secondary">← Обратно към Засичане</a>
+    {% if run.status == 'interrupted' %}
+    <form action="/scrape/resume/{{ run.id }}" method="post">
+      <button type="submit" class="btn-primary">▶ Продължи засичането</button>
+    </form>
+    {% endif %}
+  </div>
+
+{% else %}
+  {# ── Live SSE view for active or unknown runs ── #}
+  {% include "scrape_progress.html" %}
+{% endif %}
+
 {% endblock %}

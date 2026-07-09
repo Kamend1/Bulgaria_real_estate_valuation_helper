@@ -65,6 +65,7 @@ class ScrapeRun(Base):
     last_heartbeat_at = Column(TIMESTAMP(timezone=True))
     stop_requested = Column(Boolean, default=False, nullable=False)
     last_message = Column(Text)
+    log_text = Column(Text)  # full accumulated stdout log, written at completion
 
     snapshots = relationship("ListingSnapshot", back_populates="scrape_run")
 

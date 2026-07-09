@@ -531,3 +531,56 @@ def run_scrape_background(
                 run_row.status = "failed"
                 run_row.finished_at = datetime.now(timezone.utc)
                 run_row.error_message = str(exc)[:2000]
+
+
+def get_scrape_status(db) -> dict:
+    """Return data freshness info for the Scrape page status card."""
+    from sqlalchemy import text as sa_text
+
+    last_run = (
+        db.query(ScrapeRun)
+        .filter(ScrapeRun.status == "completed")
+        .order_by(ScrapeRun.finished_at.desc())
+        .first()
+    )
+
+    if last_run is None:
+        return {
+            "last_run": None,
+            "age_days": None,
+            "active_listings": 0,
+            "recommendation": "no_data",
+            "recommendation_label": "Няма данни — стартирайте засичане",
+            "recommendation_class": "error",
+        }
+
+    age_days = (
+        (datetime.now(timezone.utc) - last_run.finished_at).days
+        if last_run.finished_at else None
+    )
+
+    active_listings = db.execute(
+        sa_text("SELECT COUNT(*) FROM listings WHERE status = 'active'")
+    ).scalar() or 0
+
+    if age_days is None or age_days > 30:
+        recommendation = "outdated"
+        recommendation_label = f"Данните са остарели ({age_days or '?'} дни) — препоръчва се ново засичане"
+        recommendation_class = "error"
+    elif age_days > 14:
+        recommendation = "stale"
+        recommendation_label = f"Данните са на {age_days} дни — препоръчва се актуализация"
+        recommendation_class = "warn"
+    else:
+        recommendation = "fresh"
+        recommendation_label = f"Данните са актуални ({age_days} дни)"
+        recommendation_class = "ok"
+
+    return {
+        "last_run": last_run,
+        "age_days": age_days,
+        "active_listings": active_listings,
+        "recommendation": recommendation,
+        "recommendation_label": recommendation_label,
+        "recommendation_class": recommendation_class,
+    }

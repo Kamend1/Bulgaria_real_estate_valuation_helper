@@ -83,7 +83,9 @@ def _check_stop(run_uuid) -> bool:
 # ── Progress capture (intercepts scraper prints → DB) ─────────────────────────
 
 class _DBCapture(io.StringIO):
-    """Wraps stdout, parses scraper progress lines, writes to DB throttled."""
+    """Wraps stdout, parses scraper progress lines, writes to DB throttled.
+    Accumulates all lines so they can be written as log_text at completion.
+    """
 
     def __init__(self, run_uuid, real_stdout):
         super().__init__()
@@ -92,6 +94,7 @@ class _DBCapture(io.StringIO):
         self._buf = ""
         self._pending: dict = {}
         self._last = 0.0
+        self._log_lines: list[str] = []
 
     def write(self, s: str) -> int:
         self._real.write(s)
@@ -107,6 +110,7 @@ class _DBCapture(io.StringIO):
     def _handle(self, line: str):
         if not line:
             return
+        self._log_lines.append(line)
         self._pending["last_message"] = line[:500]
         m = _ROUTE_RE.search(line)
         if m:
@@ -130,6 +134,14 @@ class _DBCapture(io.StringIO):
 
     def final_flush(self):
         self._flush()
+
+    def append_log(self, line: str) -> None:
+        """Manually append a line (for phases that run outside redirect_stdout)."""
+        if line:
+            self._log_lines.append(line)
+
+    def get_log_text(self) -> str:
+        return "\n".join(self._log_lines)
 
 
 # ── Archiving (Phase 5) ───────────────────────────────────────────────────────
@@ -294,13 +306,15 @@ def main():
             )
             capture.final_flush()
 
-        # ── Phase: ingest ────────────────────────────────────────────────────
+        # ── Phase: ingest ────────────────────────────────────────────────────────────────────────
+        capture.append_log("─── Фаза: вписване в БД ───")
         _db_update(run_uuid, phase="ingest", last_message="Вписване в базата данни…")
 
         csv_path = run_dir / "parsed_listings.csv"
         ingested = 0
         if csv_path.exists():
             def _ingest_cb(n: int):
+                capture.append_log(f"Вписани {n} обяви…")
                 _db_update(run_uuid, listings_ingested=n,
                            last_message=f"Вписани {n} обяви…")
 
@@ -309,17 +323,25 @@ def main():
                 progress_callback=_ingest_cb,
             )
         else:
-            _db_update(run_uuid, last_message="ВНИМАНИЕ: parsed_listings.csv не е намерен")
+            _no_csv_msg = "ВНИМАНИЕ: parsed_listings.csv не е намерен"
+            capture.append_log(_no_csv_msg)
+            _db_update(run_uuid, last_message=_no_csv_msg)
 
-        # ── Phase: archive ───────────────────────────────────────────────────
+        # ── Archive ───────────────────────────────────────────────────────────────────────────
         archived = 0
         if full_coverage and ingested > 0:
+            capture.append_log("─── Фаза: архивиране на стари обяви ───")
             _db_update(run_uuid, phase="archive", last_message="Архивиране на стари обяви…")
             archived = _archive_stale(run_uuid, deal_types_normalized, run_started_at)
+            capture.append_log(f"Архивирани: {archived} обяви")
         elif full_coverage and ingested == 0:
-            _db_update(run_uuid, last_message="Архивирането е пропуснато — 0 вписани обяви")
+            _skip_msg = "Архивирането е пропуснато — 0 вписани обяви"
+            capture.append_log(_skip_msg)
+            _db_update(run_uuid, last_message=_skip_msg)
 
-        # ── Done ─────────────────────────────────────────────────────────────
+        # ── Done ────────────────────────────────────────────────────────────────────────────────
+        done_msg = f"Готово. Вписани: {ingested}, Архивирани: {archived}"
+        capture.append_log(f"─── {done_msg} ───")
         with db_session() as s:
             s.execute(text("""
                 UPDATE scrape_runs
@@ -329,12 +351,14 @@ def main():
                        listings_ingested   = :n,
                        phase               = 'done',
                        last_message        = :msg,
-                       last_heartbeat_at   = now()
+                       last_heartbeat_at   = now(),
+                       log_text            = :log_text
                  WHERE id = :id
             """), {
                 "id": run_uuid,
                 "n": ingested,
-                "msg": f"Готово. Вписани: {ingested}, Архивирани: {archived}",
+                "msg": done_msg,
+                "log_text": capture.get_log_text(),
             })
 
     except Exception as exc:
@@ -342,15 +366,21 @@ def main():
         with db_session() as s:
             s.execute(text("""
                 UPDATE scrape_runs
-                   SET status = 'failed', finished_at = now(),
-                       error_message = :err, last_heartbeat_at = now()
+                   SET status        = 'failed',
+                       finished_at   = now(),
+                       error_message = :err,
+                       last_heartbeat_at = now(),
+                       log_text      = :log_text
                  WHERE id = :id
-            """), {"id": run_uuid, "err": str(exc)[:2000]})
+            """), {
+                "id": run_uuid,
+                "err": str(exc)[:2000],
+                "log_text": capture.get_log_text(),
+            })
         print(f"SCRAPE FAILED: {exc}\n{traceback.format_exc()}", file=sys.stderr)
         sys.exit(1)
     finally:
         hb_stop.set()
-
 
 if __name__ == "__main__":
     main()
