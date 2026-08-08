@@ -11,6 +11,7 @@ from app.db.models import AppraisalReport, ComparablePool, User
 from app.db.session import get_db
 from app.dependencies import require_auth as get_current_user
 from app.templating import templates
+from app.services import avm_service
 from app.services.comparable_service import (
     MAX_PINNED,
     add_to_pool,
@@ -29,8 +30,11 @@ from app.services.comparable_service import (
     update_income_approach,
     update_pool_adjustment,
     update_residual_approach,
+    update_sales_approach,
     update_subject,
 )
+from utils.feature_engineering import PROPERTY_TYPE_DISPLAY
+from utils.ml.avm_features import GEO_CATEGORIES, SEGMENT_DISPLAY_NAMES, SEGMENT_PROPERTY_TYPES
 
 router = APIRouter(prefix="/comparables", tags=["comparables"])
 
@@ -97,6 +101,11 @@ async def comparables_page(
     report = _active_report(request, db, user)
     pool_sale = get_pool_with_stats(db, "sale", report.id)
     pool_rent = get_pool_with_stats(db, "rent", report.id)
+    avm = avm_service.predict_sales_value(db, report)
+    property_type_groups = [
+        (SEGMENT_DISPLAY_NAMES[segment], [(slug, PROPERTY_TYPE_DISPLAY.get(slug, slug)) for slug in slugs])
+        for segment, slugs in SEGMENT_PROPERTY_TYPES.items()
+    ]
     return templates.TemplateResponse(
         request,
         "comparables.html",
@@ -104,6 +113,10 @@ async def comparables_page(
             "report": report,
             "pool_sale": pool_sale,
             "pool_rent": pool_rent,
+            "avm": avm,
+            "property_type_groups": property_type_groups,
+            "geo_categories": GEO_CATEGORIES,
+            "segment_display_names": SEGMENT_DISPLAY_NAMES,
             "MAX_PINNED": MAX_PINNED,
         },
     )
@@ -204,6 +217,9 @@ async def save_subject(
     subject_year: str = Form(""),
     subject_description: str = Form(""),
     valuation_date: str = Form(""),
+    subject_property_type: str = Form(""),
+    subject_geo_category: str = Form(""),
+    subject_neighborhood: str = Form(""),
 ):
     def _int(v): return int(v) if v.strip() else None
     def _float(v): return float(v) if v.strip() else None
@@ -223,6 +239,9 @@ async def save_subject(
         "subject_year": _int(subject_year),
         "subject_description": subject_description,
         "valuation_date": _date(valuation_date),
+        "subject_property_type": subject_property_type,
+        "subject_geo_category": subject_geo_category,
+        "subject_neighborhood": subject_neighborhood,
     })
     return RedirectResponse(url="/comparables/", status_code=303)
 
@@ -260,6 +279,24 @@ async def save_income_approach(
         subject_area_sqm=_f(subject_area_sqm),
     )
     return RedirectResponse(url="/comparables/#income-panel", status_code=303)
+
+
+@router.post("/save-sales")
+async def save_sales_approach(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    concluded_value_sales: str = Form(""),
+    source: str = Form("manual"),
+):
+    def _f(v): return float(v) if v.strip() else None
+    report = _active_report(request, db, user)
+    update_sales_approach(
+        db, report.id,
+        concluded_value_sales=_f(concluded_value_sales),
+        source=source if source in ("avm", "manual") else "manual",
+    )
+    return RedirectResponse(url="/comparables/#avm-panel", status_code=303)
 
 
 @router.post("/save-residual")

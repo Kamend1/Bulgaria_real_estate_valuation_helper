@@ -57,7 +57,8 @@
     <div class="nav-auth">
       {% if request.state.user %}
         {% if request.state.user.role == 'admin' %}
-        <a href="/admin/" class="nav-auth-link nav-auth-admin {% if request.url.path.startswith('/admin') %}nav-active{% endif %}">Администрация</a>
+        <a href="/admin/" class="nav-auth-link nav-auth-admin {% if request.url.path.startswith('/admin') and not request.url.path.startswith('/admin/avm') %}nav-active{% endif %}">Администрация</a>
+        <a href="/admin/avm" class="nav-auth-link nav-auth-admin {% if request.url.path.startswith('/admin/avm') %}nav-active{% endif %}">AVM модели</a>
         {% endif %}
         <a href="/auth/profile" class="nav-auth-link {% if request.url.path.startswith('/auth/profile') %}nav-active{% endif %}">
           <svg class="nav-user-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>

@@ -45,6 +45,11 @@ ipython_config.py
 *.joblib
 *.onnx
 
+# ── DB backups ────────────────────────────────────────────────────────────────
+*.dump
+*.sql.gz
+*.pgdump
+
 # ── Local databases ───────────────────────────────────────────────────────────
 *.duckdb
 *.duckdb.wal

@@ -194,8 +194,12 @@ class AppraisalReport(Base):
     subject_construction = Column(Text)
     subject_year = Column(SmallInteger)
     subject_description = Column(Text)
+    subject_property_type = Column(Text)        # taxonomy slug, e.g. "dvustaen" | "ofis"
+    subject_geo_category = Column(Text)          # one of map_geo_category's 8 buckets
+    subject_neighborhood = Column(Text)          # matches listings.title_geo_2_model
 
     concluded_value_sales = Column(Numeric(14, 2))
+    concluded_value_sales_source = Column(String(20))   # avm | manual
 
     annual_rent_estimate = Column(Numeric(14, 2))
     gross_rent_multiplier = Column(Numeric(6, 3))
@@ -259,6 +263,31 @@ class ReportComparable(Base):
 
     report = relationship("AppraisalReport", back_populates="comparables")
     listing = relationship("Listing", back_populates="report_comparables")
+
+
+class AvmModel(Base):
+    """One row per trained AVM pipeline. Only one is_active=True row per segment."""
+    __tablename__ = "avm_models"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    segment = Column(Text, nullable=False)          # residential | office | retail | industrial | hospitality
+    trained_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    algorithm = Column(Text, nullable=False)
+
+    feature_columns = Column(JSONB, nullable=False)
+    hyperparams = Column(JSONB, nullable=False)
+    metrics = Column(JSONB)
+    target_transform = Column(Text, nullable=False, default="raw")   # raw | log1p
+
+    training_row_count = Column(Integer, nullable=False)
+    min_row_threshold = Column(Integer, nullable=False)
+
+    model_path = Column(Text, nullable=False)
+    quantile_low_path = Column(Text)
+    quantile_high_path = Column(Text)
+
+    is_active = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text)
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────

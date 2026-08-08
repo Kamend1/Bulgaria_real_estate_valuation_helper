@@ -1,15 +1,32 @@
+import subprocess
+import sys
+import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.db.models import User, UserConsent
+from app.db.models import AvmModel, User, UserConsent
 from app.db.session import get_db
 from app.services import auth_service
 from app.templating import templates
+from utils.ml.avm_features import SEGMENT_DISPLAY_NAMES, SEGMENT_PROPERTY_TYPES
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+_avm_training_active = False
+
+
+def _run_avm_training(segment: str | None) -> None:
+    global _avm_training_active
+    try:
+        cmd = [sys.executable, "-m", "scripts.train_avm_model"]
+        if segment:
+            cmd += ["--segment", segment]
+        subprocess.run(cmd, check=False)
+    finally:
+        _avm_training_active = False
 
 
 def _require_admin(request: Request):
@@ -260,3 +277,48 @@ async def admin_delete_user(request: Request, user_id: int, db: Session = Depend
     db.delete(target)
     db.commit()
     return RedirectResponse(url="/admin/?deleted=1", status_code=302)
+
+
+# ── AVM model registry ───────────────────────────────────────────────────────
+
+@router.get("/avm", response_class=HTMLResponse)
+async def admin_avm(request: Request, db: Session = Depends(get_db)):
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
+
+    models = (
+        db.query(AvmModel)
+        .order_by(AvmModel.segment, AvmModel.trained_at.desc())
+        .all()
+    )
+    by_segment: dict[str, list[AvmModel]] = {seg: [] for seg in SEGMENT_PROPERTY_TYPES}
+    for m in models:
+        by_segment.setdefault(m.segment, []).append(m)
+
+    return templates.TemplateResponse(
+        request, "admin/avm.html",
+        {
+            "by_segment": by_segment,
+            "segment_display_names": SEGMENT_DISPLAY_NAMES,
+            "training_active": _avm_training_active,
+            "started": request.query_params.get("started"),
+        },
+    )
+
+
+@router.post("/avm/retrain")
+async def admin_avm_retrain(request: Request, segment: str = Form("")):
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
+
+    global _avm_training_active
+    if not _avm_training_active:
+        _avm_training_active = True
+        threading.Thread(
+            target=_run_avm_training,
+            args=(segment or None,),
+            daemon=True,
+        ).start()
+    return RedirectResponse(url="/admin/avm?started=1", status_code=302)

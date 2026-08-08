@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}AVM модели — Администрация{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.25rem">
+  <div>
+    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.15rem">
+      <a href="/admin/" style="color:var(--muted);text-decoration:none">← Потребители</a>
+    </div>
+    <h1 style="margin:0">AVM модели за оценка</h1>
+  </div>
+  <form method="post" action="/admin/avm/retrain">
+    <button type="submit" class="btn btn-primary" {% if training_active %}disabled{% endif %}>
+      {{ 'Трениране в процес…' if training_active else 'Преобучи всички сегменти' }}
+    </button>
+  </form>
+</div>
+
+{% if started %}
+<div class="alert alert-success">
+  Трениране стартирано на заден план. Обновете страницата след няколко минути, за да видите резултата.
+</div>
+{% endif %}
+
+{% for segment, models in by_segment.items() %}
+{% set active = models | selectattr('is_active') | first %}
+<div class="card" style="margin-bottom:1.25rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:0.75rem">
+    <h2 style="margin:0">{{ segment_display_names.get(segment, segment) }}</h2>
+    <div style="display:flex;align-items:center;gap:0.5rem">
+      {% if active %}
+      <span class="badge badge-ok">Активен модел</span>
+      {% else %}
+      <span class="badge badge-warn">Няма активен модел</span>
+      {% endif %}
+      <form method="post" action="/admin/avm/retrain">
+        <input type="hidden" name="segment" value="{{ segment }}">
+        <button type="submit" class="btn btn-secondary btn-sm" {% if training_active %}disabled{% endif %}>
+          Преобучи
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {% if active %}
+  <p class="hint" style="margin-bottom:0.75rem">
+    Обучен на {{ active.trained_at.strftime('%d.%m.%Y %H:%M') }} с {{ active.training_row_count | format_number }} обяви
+    (праг: {{ active.min_row_threshold | format_number }})
+    {% if active.metrics and active.metrics.test %}
+      &nbsp;·&nbsp; MAE {{ active.metrics.test.mae | round(0) | int | format_number }} EUR/кв.м
+      &nbsp;·&nbsp; R² {{ active.metrics.test.r2 | round(3) }}
+      &nbsp;·&nbsp; в рамките на ±10% за {{ active.metrics.test.within_10_pct | round(0) | int }}%
+    {% endif %}
+  </p>
+  {% else %}
+  <p class="hint" style="margin-bottom:0.75rem">
+    Все още не е обучен модел — най-вероятно броят на training_eligible обявите за този сегмент
+    е под прага за обучение.
+  </p>
+  {% endif %}
+
+  {% if models %}
+  <div style="overflow-x:auto">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Обучен на</th>
+          <th>Обяви</th>
+          <th>MAE</th>
+          <th>R²</th>
+          <th>±10%</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in models %}
+        <tr>
+          <td>{{ m.trained_at.strftime('%d.%m.%Y %H:%M') }}</td>
+          <td>{{ m.training_row_count | format_number }}</td>
+          <td>{{ m.metrics.test.mae | round(0) | int | format_number if m.metrics and m.metrics.test else '—' }}</td>
+          <td>{{ m.metrics.test.r2 | round(3) if m.metrics and m.metrics.test else '—' }}</td>
+          <td>{{ (m.metrics.test.within_10_pct | round(0) | int ~ '%') if m.metrics and m.metrics.test else '—' }}</td>
+          <td>{% if m.is_active %}<span class="badge badge-ok">активен</span>{% else %}<span class="badge">архив</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

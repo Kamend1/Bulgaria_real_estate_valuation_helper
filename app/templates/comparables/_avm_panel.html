@@ -1,0 +1,125 @@
+{# AVM (automated valuation model) panel — segment-aware model estimate for the sales approach #}
+{% set sdn = segment_display_names %}
+
+<section class="income-panel card" id="avm-panel">
+  <h2>Пазарен подход — модел (AVM)</h2>
+
+  {% if avm.ok %}
+  <p class="hint" style="margin-bottom:1rem">
+    Сегмент: <strong>{{ sdn.get(avm.segment, avm.segment) }}</strong>
+    {% if avm.model_trained_at %}
+      &nbsp;·&nbsp; Модел обучен на {{ avm.model_trained_at.strftime('%d.%m.%Y') }}
+    {% endif %}
+    {% if avm.metrics and avm.metrics.test %}
+      &nbsp;·&nbsp; Точност: в рамките на ±10% за {{ avm.metrics.test.within_10_pct | round(0) | int }}%
+      от тестовите обяви (MAE {{ avm.metrics.test.mae | round(0) | int | format_number }} EUR/кв.м)
+    {% endif %}
+  </p>
+  {% if avm.clamped %}
+  <p class="hint" style="margin-bottom:1rem">
+    ⚠ Прогнозата е коригирана спрямо разумен диапазон за този сегмент/локация —
+    обектът е извън обичайното разпределение на данните.
+  </p>
+  {% endif %}
+
+  <div class="value-block">
+    <div class="value-card">
+      <div class="value-method">Прогноза на модела</div>
+      <div class="value-formula">EUR / кв.м</div>
+      <div class="value-result">{{ avm.ppsqm_point | format_number }}</div>
+      <div class="value-diff">диапазон {{ avm.ppsqm_low | format_number }} – {{ avm.ppsqm_high | format_number }} EUR/кв.м</div>
+    </div>
+    <div class="value-card">
+      <div class="value-method">Обща стойност</div>
+      <div class="value-formula">EUR/кв.м × площ</div>
+      <div class="value-result">{{ avm.total_point | format_number }}</div>
+      <div class="value-diff">диапазон {{ avm.total_low | format_number }} – {{ avm.total_high | format_number }} EUR</div>
+    </div>
+  </div>
+
+  <div class="approach-save-bar" style="margin-top:1rem">
+    {% if report.concluded_value_sales %}
+    <div class="approach-saved-notice">
+      Закачено в доклада: <strong>{{ report.concluded_value_sales | format_number }} EUR</strong>
+      {% if report.concluded_value_sales_source %}
+        &nbsp;·&nbsp; източник: {{ 'модел (AVM)' if report.concluded_value_sales_source == 'avm' else 'ръчно' }}
+      {% endif %}
+    </div>
+    {% endif %}
+    <div class="approach-save-row">
+      <div class="income-group">
+        <label class="income-label">Заключена стойност (може да редактирате)</label>
+        <input type="number" id="avm-value-input" step="1" min="0" value="{{ avm.total_point }}">
+      </div>
+      <form method="post" action="/comparables/save-sales" id="avm-save-form" style="display:flex;align-items:flex-end">
+        <input type="hidden" name="concluded_value_sales" id="avm-frm-value" value="{{ avm.total_point }}">
+        <input type="hidden" name="source" id="avm-frm-source" value="avm">
+        <button type="submit" class="btn-primary" style="white-space:nowrap">Закачи към доклада</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var input  = document.getElementById('avm-value-input');
+    var hidden = document.getElementById('avm-frm-value');
+    var source = document.getElementById('avm-frm-source');
+    if (!input) return;
+    var original = input.value;
+    input.addEventListener('input', function () {
+      hidden.value = input.value;
+      source.value = (input.value === original) ? 'avm' : 'manual';
+    });
+  }());
+  </script>
+
+  {% else %}
+
+  <div class="badge badge-warn" style="display:inline-block;margin-bottom:0.75rem">
+    {% if avm.reason == 'missing_fields' %}
+      Моделът изисква попълнени данни за обекта
+    {% elif avm.reason == 'unsupported_property_type' %}
+      Избраният вид имот не се поддържа от модела
+    {% elif avm.reason == 'no_model' %}
+      Няма обучен модел за този сегмент все още
+    {% else %}
+      Прогнозата не е налична
+    {% endif %}
+  </div>
+
+  {% if avm.reason == 'missing_fields' %}
+  {% set field_labels = {
+    'subject_area_sqm': 'Площ',
+    'subject_city': 'Град',
+    'subject_property_type': 'Вид имот',
+    'subject_geo_category': 'Гео-категория',
+  } %}
+  <p class="hint">
+    Попълнете в секция „Оценяван имот“ по-горе:
+    {% for f in avm.missing_fields %}{{ field_labels.get(f, f) }}{% if not loop.last %}, {% endif %}{% endfor %}.
+  </p>
+  {% elif avm.reason == 'no_model' %}
+  <p class="hint">
+    Все още няма достатъчно данни за обучение на модел за сегмент
+    „{{ sdn.get(avm.segment, avm.segment) }}“. Може да въведете стойност по пазарен подход ръчно по-долу.
+  </p>
+  {% endif %}
+
+  <div class="approach-save-bar" style="margin-top:0.75rem">
+    {% if report.concluded_value_sales %}
+    <div class="approach-saved-notice">
+      Закачено в доклада: <strong>{{ report.concluded_value_sales | format_number }} EUR</strong>
+    </div>
+    {% endif %}
+    <form method="post" action="/comparables/save-sales" class="approach-save-row">
+      <div class="income-group">
+        <label class="income-label">Заключена стойност (ръчно)</label>
+        <input type="number" name="concluded_value_sales" step="1" min="0">
+      </div>
+      <input type="hidden" name="source" value="manual">
+      <button type="submit" class="btn-primary" style="white-space:nowrap">Закачи към доклада</button>
+    </form>
+  </div>
+
+  {% endif %}
+</section>

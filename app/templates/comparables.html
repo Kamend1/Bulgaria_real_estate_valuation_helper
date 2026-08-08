@@ -64,6 +64,32 @@
         <input type="number" step="0.01" name="subject_area_sqm" value="{{ report.subject_area_sqm or '' }}">
       </div>
       <div class="form-group">
+        <label>Вид имот <span class="income-hint">за модела за оценка</span></label>
+        <select name="subject_property_type">
+          <option value="">— избери —</option>
+          {% for group_label, options in property_type_groups %}
+          <optgroup label="{{ group_label }}">
+            {% for slug, display_name in options %}
+            <option value="{{ slug }}" {% if report.subject_property_type == slug %}selected{% endif %}>{{ display_name }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Геo-категория <span class="income-hint">за модела за оценка</span></label>
+        <select name="subject_geo_category">
+          <option value="">— избери —</option>
+          {% for cat in geo_categories %}
+          <option value="{{ cat }}" {% if report.subject_geo_category == cat %}selected{% endif %}>{{ cat }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Квартал / зона</label>
+        <input type="text" name="subject_neighborhood" value="{{ report.subject_neighborhood or '' }}">
+      </div>
+      <div class="form-group">
         <label>Етаж</label>
         <input type="number" name="subject_floor" value="{{ report.subject_floor or '' }}">
       </div>
@@ -170,6 +196,8 @@
   Добавете обяви от <a href="/listings/">страницата за търсене</a>.
   📌 = включено в доклад (макс. {{ MAX_PINNED }} от всеки тип).
 </p>
+
+{% include "comparables/_avm_panel.html" %}
 
 {% include "comparables/_income_analysis.html" %}
 

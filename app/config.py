@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     scrape_runs_dir: str = "data/scrape_runs"
     reports_output_dir: str = "outputs/reports"
     report_template_path: str = "templates/reports/appraisal_template.docx"
+    avm_models_dir: str = "models/avm"
 
     scrape_max_workers_routes: int = 8
     scrape_max_workers_listings: int = 16

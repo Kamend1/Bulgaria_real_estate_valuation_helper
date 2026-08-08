@@ -567,6 +567,7 @@ def update_subject(db: Session, report_id: uuid.UUID, data: dict) -> None:
         "title", "subject_address", "subject_city", "subject_area_sqm",
         "subject_floor", "subject_total_floors", "subject_construction",
         "subject_year", "subject_description", "valuation_date",
+        "subject_property_type", "subject_geo_category", "subject_neighborhood",
     )
     for f in fields:
         if f in data:
@@ -592,6 +593,21 @@ def update_income_approach(
     if concluded_per_sqm is not None:
         area = subject_area_sqm or float(report.subject_area_sqm or 0)
         report.concluded_value_income = round(concluded_per_sqm * area, 2) if area > 0 else round(concluded_per_sqm, 2)
+    db.commit()
+
+
+def update_sales_approach(
+    db: Session,
+    report_id: uuid.UUID,
+    concluded_value_sales: float | None,
+    source: str = "manual",
+) -> None:
+    report = db.get(AppraisalReport, report_id)
+    if not report:
+        return
+    if concluded_value_sales is not None:
+        report.concluded_value_sales = round(concluded_value_sales, 2)
+        report.concluded_value_sales_source = source
     db.commit()
 
 
