@@ -10,11 +10,12 @@ import uuid
 
 import joblib
 import numpy as np
+import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.models import AppraisalReport, AvmModel
-from utils.ml import avm_features
+from utils.ml import avm_features, text_features
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,25 @@ def _load_pipelines(meta: AvmModel) -> dict:
         "q_low": joblib.load(meta.quantile_low_path),
         "q_high": joblib.load(meta.quantile_high_path),
     }
+    if meta.companion_model_path:
+        pipelines["companion_point"] = joblib.load(meta.companion_model_path)
+        pipelines["companion_q_low"] = joblib.load(meta.companion_quantile_low_path)
+        pipelines["companion_q_high"] = joblib.load(meta.companion_quantile_high_path)
+    if meta.text_transformer_path:
+        pipelines["text_transformer"] = joblib.load(meta.text_transformer_path)
     _PIPELINE_CACHE[meta.id] = pipelines
     return pipelines
+
+
+def _predict_one_catboost(model, row, use_log: bool) -> float:
+    """Same as _predict_one but for a raw CatBoostRegressor (no sklearn
+    Pipeline wrapper) — needs categoricals fillna'd first, see
+    utils.ml.avm_features.prep_for_catboost."""
+    cb_row = avm_features.prep_for_catboost(row)
+    pred = float(model.predict(cb_row)[0])
+    if use_log:
+        pred = float(np.expm1(pred))
+    return max(pred, 1.0)
 
 
 def _predict_one(pipeline, row, use_log: bool) -> float:
@@ -90,16 +108,34 @@ def predict_sales_value(db: Session, report: AppraisalReport) -> dict:
         return {"ok": False, "reason": "no_model", "segment": segment}
 
     try:
-        row = avm_features.build_feature_row(db, report, meta.feature_columns)
+        structured_cols = [c for c in meta.feature_columns if not c.startswith(text_features.TEXT_FEATURE_PREFIX)]
+        row = avm_features.build_feature_row(db, report, structured_cols)
     except ValueError:
         return {"ok": False, "reason": "missing_fields", "missing_fields": missing}
 
     try:
         pipelines = _load_pipelines(meta)
+        if meta.text_transformer_path:
+            text_row = text_features.transform_tfidf_svd(
+                pd.Series([report.subject_description or ""]), pipelines["text_transformer"]
+            )
+            row = pd.concat([row.reset_index(drop=True), text_row.reset_index(drop=True)], axis=1)
+
         use_log = meta.target_transform == "log1p"
         ppsqm_point = _predict_one(pipelines["point"], row, use_log)
         ppsqm_low = _predict_one(pipelines["q_low"], row, use_log)
         ppsqm_high = _predict_one(pipelines["q_high"], row, use_log)
+
+        blended = False
+        if meta.blend_weight is not None and "companion_point" in pipelines:
+            w = float(meta.blend_weight)
+            cb_point = _predict_one_catboost(pipelines["companion_point"], row, use_log)
+            cb_low = _predict_one_catboost(pipelines["companion_q_low"], row, use_log)
+            cb_high = _predict_one_catboost(pipelines["companion_q_high"], row, use_log)
+            ppsqm_point = w * ppsqm_point + (1 - w) * cb_point
+            ppsqm_low = w * ppsqm_low + (1 - w) * cb_low
+            ppsqm_high = w * ppsqm_high + (1 - w) * cb_high
+            blended = True
     except Exception:
         logger.exception("AVM prediction failed for report %s, segment %s", report.id, segment)
         return {"ok": False, "reason": "prediction_error"}
@@ -130,4 +166,5 @@ def predict_sales_value(db: Session, report: AppraisalReport) -> dict:
         "model_trained_at": meta.trained_at,
         "metrics": meta.metrics,
         "clamped": clamped,
+        "blended": blended,
     }

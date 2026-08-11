@@ -1,0 +1,498 @@
+<title>AVM Model Diagnostics — imot.bg Appraisal Helper</title>
+
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-alt: #edeff3;
+    --border: #dbdfe6;
+    --ink: #1b1e26;
+    --ink-muted: #5b6270;
+    --ink-faint: #868d99;
+    --accent: #3454d1;
+    --accent-ink: #24399c;
+    --accent-bg: #e8ecfb;
+    --good: #1f8a5f;
+    --good-bg: #e5f5ec;
+    --critical: #c4432b;
+    --critical-bg: #fbe9e4;
+    --warn: #a6720a;
+    --warn-bg: #fbf3df;
+    --shadow: 0 1px 2px rgba(27,30,38,0.04), 0 4px 14px rgba(27,30,38,0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161b;
+      --surface: #1b1e26;
+      --surface-alt: #21242d;
+      --border: #313641;
+      --ink: #edeef2;
+      --ink-muted: #9ba1ae;
+      --ink-faint: #6c7381;
+      --accent: #8da0f2;
+      --accent-ink: #b7c3f7;
+      --accent-bg: #202849;
+      --good: #4cc38a;
+      --good-bg: #143024;
+      --critical: #f0765c;
+      --critical-bg: #3a1b14;
+      --warn: #e0b23d;
+      --warn-bg: #332a0f;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 20px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161b;
+    --surface: #1b1e26;
+    --surface-alt: #21242d;
+    --border: #313641;
+    --ink: #edeef2;
+    --ink-muted: #9ba1ae;
+    --ink-faint: #6c7381;
+    --accent: #8da0f2;
+    --accent-ink: #b7c3f7;
+    --accent-bg: #202849;
+    --good: #4cc38a;
+    --good-bg: #143024;
+    --critical: #f0765c;
+    --critical-bg: #3a1b14;
+    --warn: #e0b23d;
+    --warn-bg: #332a0f;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 20px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "IBM Plex Sans", system-ui, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+  }
+
+  .mono {
+    font-family: ui-monospace, "Cascadia Mono", "SF Mono", "Consolas", "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  a { color: var(--accent); }
+
+  .wrap { max-width: 960px; margin: 0 auto; }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header.page {
+    padding: 3rem 0 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2.25rem;
+  }
+  .eyebrow {
+    font-family: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    background: var(--accent-bg);
+    display: inline-block;
+    padding: 0.28rem 0.6rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: clamp(1.7rem, 1.2rem + 2vw, 2.5rem);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.6rem;
+    text-wrap: balance;
+    font-weight: 700;
+  }
+  .subtitle {
+    color: var(--ink-muted);
+    font-size: 1.05rem;
+    max-width: 62ch;
+    margin: 0 0 1.4rem;
+    text-wrap: balance;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.4rem;
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+  }
+  .meta-row b { color: var(--ink-muted); font-weight: 600; }
+
+  /* ── Section scaffolding ────────────────────────────────── */
+  section.block { margin-bottom: 2.75rem; }
+  .section-head { display: flex; align-items: baseline; gap: 0.65rem; margin-bottom: 0.9rem; }
+  .section-num {
+    font-family: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.78rem; color: var(--ink-faint);
+  }
+  h2 {
+    font-size: 1.32rem;
+    margin: 0;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+  }
+  h3 { font-size: 1.02rem; margin: 1.4rem 0 0.6rem; color: var(--ink); }
+  p { margin: 0 0 0.9rem; max-width: 74ch; }
+  p.lede { color: var(--ink-muted); max-width: 74ch; }
+
+  /* ── Scoreboard ─────────────────────────────────────────── */
+  .scoreboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.85rem;
+  }
+  .score-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem 1.05rem;
+    box-shadow: var(--shadow);
+    position: relative;
+  }
+  .score-card .seg-name { font-weight: 600; font-size: 0.92rem; margin-bottom: 0.65rem; }
+  .score-metric { display: flex; align-items: baseline; gap: 0.4rem; margin-bottom: 0.3rem; }
+  .score-metric .label { font-size: 0.72rem; color: var(--ink-faint); width: 2.6rem; flex-shrink: 0; }
+  .score-metric .val { font-size: 0.95rem; }
+  .score-metric .arrow-good { color: var(--good); }
+  .score-metric .arrow-crit { color: var(--critical); }
+  .flag {
+    position: absolute; top: 0.8rem; right: 0.8rem;
+    font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 0.16rem 0.45rem; border-radius: 3px; font-weight: 600;
+  }
+  .flag.fixed { background: var(--good-bg); color: var(--good); }
+  .flag.improved { background: var(--accent-bg); color: var(--accent-ink); }
+
+  /* ── Finding callouts ───────────────────────────────────── */
+  .finding {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 8px 8px 0;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+    box-shadow: var(--shadow);
+  }
+  .finding.critical { border-left-color: var(--critical); }
+  .finding.good { border-left-color: var(--good); }
+  .finding .f-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; margin-bottom: 0.35rem; }
+  .finding .f-title { font-weight: 600; font-size: 0.98rem; }
+  .pill {
+    font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase;
+    font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 20px; white-space: nowrap;
+  }
+  .pill.critical { background: var(--critical-bg); color: var(--critical); }
+  .pill.good { background: var(--good-bg); color: var(--good); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.neutral { background: var(--surface-alt); color: var(--ink-muted); }
+
+  /* ── Tables ─────────────────────────────────────────────── */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.86rem; min-width: 560px; }
+  thead th {
+    text-align: left; font-weight: 600; font-size: 0.72rem; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--ink-faint);
+    padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.winner { background: var(--good-bg); }
+  tbody tr.winner td:first-child { font-weight: 600; }
+  tbody tr.tuned { background: var(--accent-bg); }
+  tbody tr.tuned td:first-child { font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .delta-good { color: var(--good); }
+  .delta-bad { color: var(--critical); }
+  .example-row-url { color: var(--ink-faint); font-size: 0.76rem; }
+
+  details.seg-details {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+    box-shadow: var(--shadow); margin-top: 0.9rem; overflow: hidden;
+  }
+  details.seg-details summary {
+    cursor: pointer; padding: 0.85rem 1.1rem; font-weight: 600; font-size: 0.92rem;
+    list-style: none; display: flex; align-items: center; gap: 0.6rem;
+  }
+  details.seg-details summary::-webkit-details-marker { display: none; }
+  details.seg-details summary::before {
+    content: "▸"; color: var(--ink-faint); font-size: 0.75rem; transition: transform 0.15s ease;
+  }
+  details.seg-details[open] summary::before { transform: rotate(90deg); }
+  details.seg-details .panel-body { padding: 0 1.1rem 1.1rem; }
+  details.seg-details summary .sub { font-weight: 400; color: var(--ink-faint); font-size: 0.82rem; }
+
+  /* ── Recommendation list ────────────────────────────────── */
+  .rec-list { display: flex; flex-direction: column; gap: 0.7rem; }
+  .rec {
+    display: grid; grid-template-columns: 6.5rem 1fr; gap: 1rem;
+    border: 1px solid var(--border); background: var(--surface); border-radius: 8px;
+    padding: 0.9rem 1.1rem; box-shadow: var(--shadow); align-items: start;
+  }
+  .rec .rec-tag { padding-top: 0.1rem; }
+  .rec .rec-body b { display: block; margin-bottom: 0.15rem; }
+  .rec .rec-body span { color: var(--ink-muted); font-size: 0.9rem; }
+
+  footer.page {
+    margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+    color: var(--ink-faint); font-size: 0.8rem;
+  }
+
+  @media (max-width: 640px) {
+    .rec { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="page">
+  <span class="eyebrow">AVM Diagnostics · imot.bg Appraisal Helper</span>
+  <h1>Why the model was wrong, and what actually fixes it</h1>
+  <p class="subtitle">EDA, data cleaning, target-transform, scaling, and LightGBM hyperparameter experiments across all 5 property segments — run against the live 263K-listing database.</p>
+  <div class="meta-row">
+    <span><b>Run date</b> 07 Aug 2026, 20:09–20:28</span>
+    <span><b>Duration</b> 18m 46s</span>
+    <span><b>Segments</b> 5</span>
+    <span><b>Evaluation</b> 5-fold CV (mean ± std)</span>
+    <span><b>Scope</b> exploratory only — production models untouched</span>
+  </div>
+</header>
+
+<section class="block">
+  <div class="section-head"><span class="section-num">01</span><h2>Headline result</h2></div>
+  <p class="lede">One change explains almost everything: <b style="color:var(--ink)">excluding foreign listings and implausible-area rows, then trimming the extreme 0.5% tails of the target</b>, before any modeling happens. It rescued industrial from a broken model, stabilized residential's wildly inconsistent validation scores, and improved every segment. Hyperparameter tuning added a further, smaller gain — mainly for residential.</p>
+
+  <div class="scoreboard">
+    <div class="score-card">
+      <span class="flag improved">stabilized</span>
+      <div class="seg-name">Residential</div>
+      <div class="score-metric"><span class="label">MAE</span><span class="val mono">353 → <b class="arrow-good">273</b> EUR/m²</span></div>
+      <div class="score-metric"><span class="label">R²</span><span class="val mono">0.35 → <b class="arrow-good">0.79</b></span></div>
+      <div class="score-metric"><span class="label">±10%</span><span class="val mono">36% → <b class="arrow-good">43%</b></span></div>
+    </div>
+    <div class="score-card">
+      <span class="flag improved">improved</span>
+      <div class="seg-name">Office</div>
+      <div class="score-metric"><span class="label">MAE</span><span class="val mono">593 → <b class="arrow-good">536</b> EUR/m²</span></div>
+      <div class="score-metric"><span class="label">R²</span><span class="val mono">0.42 → <b class="arrow-good">0.51</b></span></div>
+      <div class="score-metric"><span class="label">±10%</span><span class="val mono">24% → <b class="arrow-good">24%</b></span></div>
+    </div>
+    <div class="score-card">
+      <span class="flag improved">improved</span>
+      <div class="seg-name">Retail</div>
+      <div class="score-metric"><span class="label">MAE</span><span class="val mono">635 → <b class="arrow-good">536</b> EUR/m²</span></div>
+      <div class="score-metric"><span class="label">R²</span><span class="val mono">0.37 → <b class="arrow-good">0.51</b></span></div>
+      <div class="score-metric"><span class="label">±10%</span><span class="val mono">18% → <b class="arrow-good">18%</b></span></div>
+    </div>
+    <div class="score-card">
+      <span class="flag fixed">rescued</span>
+      <div class="seg-name">Industrial</div>
+      <div class="score-metric"><span class="label">MAE</span><span class="val mono">434 → <b class="arrow-good">245</b> EUR/m²</span></div>
+      <div class="score-metric"><span class="label">R²</span><span class="val mono"><b class="arrow-crit">−0.29</b> → <b class="arrow-good">0.47</b></span></div>
+      <div class="score-metric"><span class="label">±10%</span><span class="val mono">10% → <b class="arrow-good">12%</b></span></div>
+    </div>
+    <div class="score-card">
+      <span class="flag improved">improved</span>
+      <div class="seg-name">Hospitality</div>
+      <div class="score-metric"><span class="label">MAE</span><span class="val mono">434 → <b class="arrow-good">381</b> EUR/m²</span></div>
+      <div class="score-metric"><span class="label">R²</span><span class="val mono">0.34 → <b class="arrow-good">0.33</b></span></div>
+      <div class="score-metric"><span class="label">±10%</span><span class="val mono">13% → <b class="arrow-good">14%</b></span></div>
+    </div>
+  </div>
+  <p style="margin-top:0.9rem;font-size:0.83rem;color:var(--ink-faint)">Left value in each row = this experiment's own 5-fold CV baseline (config A, matching current production logic). Right value = cleaned data + best target/scaling config + tuned LightGBM. Hospitality's R² is a rounding wash (0.343 → 0.334) — see §5.</p>
+</section>
+
+<section class="block">
+  <div class="section-head"><span class="section-num">02</span><h2>Root cause: two concrete data bugs, not vague "outliers"</h2></div>
+
+  <div class="finding critical">
+    <div class="f-head"><span class="f-title">Area-parsing failures produce absurd price/m² values</span><span class="pill critical">8 rows at exactly 1.00 m²</span></div>
+    <p style="margin-bottom:0.6rem">The single worst offender in the entire residential set: a Halkidiki villa listed at €310,000 with <code class="mono">area_sqm_model = 1.00</code> — giving a "price per m²" of €310,000. Six more of the top 15 residential listings by price/m² share the identical <code class="mono">area = 1.00</code> signature. This isn't market variance; it's the area parser falling back to a placeholder when it can't extract a real number.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Listing</th><th class="num">Price</th><th class="num">Area (m²)</th><th class="num">Price/m²</th></tr></thead>
+        <tbody>
+          <tr><td>vila, Halkidiki (Greece)<div class="example-row-url mono">…prodava-vila-gartsiya-halkidiki</div></td><td class="num mono">€310,000</td><td class="num mono">1.00</td><td class="num mono critical" style="color:var(--critical)">€310,000</td></tr>
+          <tr><td>tristaen apt., Momchilgrad</td><td class="num mono">€137,000</td><td class="num mono">1.00</td><td class="num mono" style="color:var(--critical)">€137,000</td></tr>
+          <tr><td>kashta, Septemvri</td><td class="num mono">€135,000</td><td class="num mono">1.00</td><td class="num mono" style="color:var(--critical)">€135,000</td></tr>
+          <tr><td colspan="4" style="color:var(--ink-faint);font-style:italic">+ 5 more rows, identical area=1.00 pattern</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="finding critical">
+    <div class="f-head"><span class="f-title">Foreign vacation homes mixed into the Bulgarian residential set</span><span class="pill critical">1,054 rows, 0.73%</span></div>
+    <p>Mostly Greek Halkidiki listings (already tagged <code class="mono">geo_category = 'foreign'</code> by the existing pipeline, just never excluded from training). A domestic Bulgarian appraisal tool has no business learning Greek coastal pricing as part of its Sofia/Plovdiv/Varna price surface — this is a scope decision, not only a statistical one.</p>
+  </div>
+
+  <div class="finding">
+    <div class="f-head"><span class="f-title">Combined effect on residential's target distribution</span><span class="pill neutral">skewness 87.3 → 0.77</span></div>
+    <p>Before cleaning, residential price/m² had a skewness coefficient of <b class="mono">87.3</b> — a distribution dominated by a handful of extreme values, not a genuinely long-tailed market. After removing foreign rows, the area≤15m² rows, and trimming the remaining 0.5%/99.5% tails (2,550 rows total, 1.78%), skewness dropped to <b class="mono">0.77</b> — mildly right-skewed, which is exactly what a real, healthy housing-price distribution should look like. Every other segment showed the same pattern (retail 7.1→1.3, industrial 47.3→1.8, office 4.5→0.9, hospitality 2.0→1.5).</p>
+  </div>
+</section>
+
+<section class="block">
+  <div class="section-head"><span class="section-num">03</span><h2>Why cross-validation, not a single split</h2></div>
+  <p>The production models (deployed before this investigation) were evaluated on one random 60/20/20 stratified split. Residential's validation R² came out at <b class="mono">0.11</b> while its test R² came out at <b class="mono">0.60</b> — the same model, two wildly different scores depending on which fold a handful of extreme rows happened to land in. That instability was the first clue something was structurally wrong, not just "needs more tuning."</p>
+  <p>This round switched to 5-fold cross-validation, reporting mean ± standard deviation across folds. The std itself is diagnostic: residential's fold-to-fold R² std on <i>uncleaned</i> data was <b class="mono">±0.121</b> — huge instability, matching the earlier single-split symptom exactly. On <i>cleaned</i> data, that std collapsed to <b class="mono">±0.005</b>. That collapse in variance is the strongest evidence in this whole investigation that the cleaning step, not the model or its hyperparameters, was the real problem.</p>
+</section>
+
+<section class="block">
+  <div class="section-head"><span class="section-num">04</span><h2>What each lever actually did</h2></div>
+  <p class="lede">Four configurations were compared per segment, all under identical 5-fold CV: <b>(A)</b> raw data, raw target — matches current production. <b>(B)</b> cleaned data, raw target. <b>(C)</b> cleaned data, log1p-transformed target. <b>(D)</b> cleaned data, log target, numeric features standardized.</p>
+
+  <details class="seg-details" open>
+    <summary>Residential <span class="sub">143,624 → 141,074 rows after cleaning</span></summary>
+    <div class="panel-body">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Config</th><th class="num">MAE (EUR/m²)</th><th class="num">R²</th><th class="num">±10%</th><th class="num">±20%</th></tr></thead>
+          <tbody>
+            <tr><td>A — raw data, raw target <span style="color:var(--ink-faint)">(≈ production)</span></td><td class="num mono">353.0 ± 2.5</td><td class="num mono">0.345 ± 0.121</td><td class="num mono">35.7%</td><td class="num mono">61.4%</td></tr>
+            <tr class="winner"><td>B — clean data, raw target</td><td class="num mono">304.5 ± 1.7</td><td class="num mono">0.754 ± 0.005</td><td class="num mono">38.1%</td><td class="num mono">64.3%</td></tr>
+            <tr><td>C — clean data, log target</td><td class="num mono">305.4 ± 1.5</td><td class="num mono">0.738 ± 0.005</td><td class="num mono">38.0%</td><td class="num mono">64.8%</td></tr>
+            <tr><td>D — clean, log, scaled</td><td class="num mono">305.7 ± 1.6</td><td class="num mono">0.738 ± 0.006</td><td class="num mono">37.9%</td><td class="num mono">64.7%</td></tr>
+            <tr class="tuned"><td>Tuned LightGBM on B</td><td class="num mono">272.9 ± 1.7</td><td class="num mono">0.792 ± 0.005</td><td class="num mono">43.3%</td><td class="num mono">69.0%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Best hyperparameters found</h3>
+      <p class="mono" style="font-size:0.82rem;color:var(--ink-muted)">n_estimators=800, learning_rate=0.05, num_leaves=127, max_depth=−1, min_child_samples=10, subsample=1.0, colsample_bytree=0.9, reg_lambda=0.1, reg_alpha=0.0</p>
+      <p style="font-size:0.87rem">Search: RandomizedSearchCV, 25 candidates × 3-fold (6m26s). Log-transform made <b>no real difference</b> once cleaned (B vs C is noise-level). Scaling made no difference (C vs D, as expected for a tree model). Tuning was the second-largest lever here specifically <i>because</i> residential has 141K rows — enough signal for 127-leaf trees and 800 estimators to actually pay off.</p>
+    </div>
+  </details>
+
+  <details class="seg-details">
+    <summary>Office <span class="sub">2,807 → 2,778 rows after cleaning</span></summary>
+    <div class="panel-body">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Config</th><th class="num">MAE (EUR/m²)</th><th class="num">R²</th><th class="num">±10%</th><th class="num">±20%</th></tr></thead>
+          <tbody>
+            <tr><td>A — raw data, raw target <span style="color:var(--ink-faint)">(≈ production)</span></td><td class="num mono">593.5 ± 22.5</td><td class="num mono">0.421 ± 0.072</td><td class="num mono">23.8%</td><td class="num mono">44.7%</td></tr>
+            <tr><td>B — clean data, raw target</td><td class="num mono">540.0 ± 19.8</td><td class="num mono">0.527 ± 0.067</td><td class="num mono">24.0%</td><td class="num mono">46.0%</td></tr>
+            <tr><td>C — clean data, log target</td><td class="num mono">538.0 ± 15.8</td><td class="num mono">0.504 ± 0.060</td><td class="num mono">24.7%</td><td class="num mono">46.5%</td></tr>
+            <tr class="winner"><td>D — clean, log, scaled</td><td class="num mono">536.0 ± 14.1</td><td class="num mono">0.504 ± 0.058</td><td class="num mono">24.9%</td><td class="num mono">47.7%</td></tr>
+            <tr class="tuned"><td>Tuned LightGBM on D</td><td class="num mono">535.7 ± 11.0</td><td class="num mono">0.509 ± 0.045</td><td class="num mono">23.6%</td><td class="num mono">45.4%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Best hyperparameters found</h3>
+      <p class="mono" style="font-size:0.82rem;color:var(--ink-muted)">n_estimators=800, learning_rate=0.02, num_leaves=15, max_depth=12, min_child_samples=10, subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0, reg_alpha=1.0</p>
+      <p style="font-size:0.87rem">Search: 40 candidates × 3-fold (1m54s). Tuning mainly tightened the fold-to-fold std (±19.8 → ±11.0), barely moved the mean MAE. Note: with only 1 taxonomy slug in this segment, <code class="mono">property_type_raw</code> is a near-constant column here — it carries no signal for office specifically.</p>
+    </div>
+  </details>
+
+  <details class="seg-details">
+    <summary>Retail <span class="sub">7,464 → 7,377 rows after cleaning</span></summary>
+    <div class="panel-body">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Config</th><th class="num">MAE (EUR/m²)</th><th class="num">R²</th><th class="num">±10%</th><th class="num">±20%</th></tr></thead>
+          <tbody>
+            <tr><td>A — raw data, raw target <span style="color:var(--ink-faint)">(≈ production)</span></td><td class="num mono">635.3 ± 17.1</td><td class="num mono">0.366 ± 0.066</td><td class="num mono">17.7%</td><td class="num mono">32.4%</td></tr>
+            <tr><td>B — clean data, raw target</td><td class="num mono">544.7 ± 10.3</td><td class="num mono">0.547 ± 0.013</td><td class="num mono">18.9%</td><td class="num mono">34.7%</td></tr>
+            <tr class="winner"><td>C — clean data, log target</td><td class="num mono">535.9 ± 7.2</td><td class="num mono">0.514 ± 0.007</td><td class="num mono">17.7%</td><td class="num mono">35.2%</td></tr>
+            <tr><td>D — clean, log, scaled</td><td class="num mono">538.0 ± 7.8</td><td class="num mono">0.512 ± 0.005</td><td class="num mono">18.0%</td><td class="num mono">35.5%</td></tr>
+            <tr class="tuned"><td>Tuned LightGBM on C</td><td class="num mono">536.5 ± 7.1</td><td class="num mono">0.512 ± 0.006</td><td class="num mono">17.9%</td><td class="num mono">34.6%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Best hyperparameters found</h3>
+      <p class="mono" style="font-size:0.82rem;color:var(--ink-muted)">n_estimators=1200, learning_rate=0.03, num_leaves=31, max_depth=6, min_child_samples=10, subsample=1.0, colsample_bytree=0.7, reg_lambda=5.0, reg_alpha=1.0</p>
+      <p style="font-size:0.87rem">Search: 40 candidates × 3-fold (2m50s). Tuning was flat-to-negative on the mean here (535.9 → 536.5) — cleaning did essentially all the work. <code class="mono">biznes-imot</code>'s catch-all heterogeneity (25 distinct property_type_raw values, the most of any segment) is the likely ceiling on further gains without more features.</p>
+    </div>
+  </details>
+
+  <details class="seg-details">
+    <summary>Industrial <span class="sub">3,155 → 3,104 rows after cleaning — previously a broken model</span></summary>
+    <div class="panel-body">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Config</th><th class="num">MAE (EUR/m²)</th><th class="num">R²</th><th class="num">±10%</th><th class="num">±20%</th></tr></thead>
+          <tbody>
+            <tr><td>A — raw data, raw target <span style="color:var(--ink-faint)">(≈ production)</span></td><td class="num mono">434.1 ± 81.1</td><td class="num mono" style="color:var(--critical)">−0.285 ± 0.449</td><td class="num mono">9.8%</td><td class="num mono">19.4%</td></tr>
+            <tr><td>B — clean data, raw target</td><td class="num mono">260.0 ± 7.4</td><td class="num mono">0.493 ± 0.037</td><td class="num mono">12.8%</td><td class="num mono">24.8%</td></tr>
+            <tr><td>C — clean data, log target</td><td class="num mono">251.4 ± 10.0</td><td class="num mono">0.461 ± 0.033</td><td class="num mono">11.9%</td><td class="num mono">24.1%</td></tr>
+            <tr class="winner"><td>D — clean, log, scaled</td><td class="num mono">249.6 ± 12.0</td><td class="num mono">0.465 ± 0.037</td><td class="num mono">12.3%</td><td class="num mono">23.4%</td></tr>
+            <tr class="tuned"><td>Tuned LightGBM on D</td><td class="num mono">244.9 ± 9.5</td><td class="num mono">0.471 ± 0.031</td><td class="num mono">12.3%</td><td class="num mono">24.4%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Best hyperparameters found</h3>
+      <p class="mono" style="font-size:0.82rem;color:var(--ink-muted)">n_estimators=800, learning_rate=0.02, num_leaves=63, max_depth=6, min_child_samples=10, subsample=0.9, colsample_bytree=1.0, reg_lambda=0.1, reg_alpha=0.1</p>
+      <p style="font-size:0.87rem">This is the headline fix. R² of <b style="color:var(--critical)">−0.285 ± 0.449</b> means the previously-deployed approach performed <i>worse than predicting the segment mean</i>, and the huge std means it wasn't even consistently bad — it varied wildly by fold. Cleaning alone (row B) already resolves this to a legitimately usable R²=0.49. <code class="mono">floor_model</code>/<code class="mono">total_floors_model</code> are 56% missing in this segment (warehouses often don't report floor count) — low-value features here regardless of tuning.</p>
+    </div>
+  </details>
+
+  <details class="seg-details">
+    <summary>Hospitality <span class="sub">1,124 → 1,098 rows after cleaning — smallest segment</span></summary>
+    <div class="panel-body">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Config</th><th class="num">MAE (EUR/m²)</th><th class="num">R²</th><th class="num">±10%</th><th class="num">±20%</th></tr></thead>
+          <tbody>
+            <tr><td>A — raw data, raw target <span style="color:var(--ink-faint)">(≈ production)</span></td><td class="num mono">434.2 ± 22.0</td><td class="num mono">0.343 ± 0.111</td><td class="num mono">12.6%</td><td class="num mono">26.3%</td></tr>
+            <tr><td>B — clean data, raw target</td><td class="num mono">397.0 ± 14.8</td><td class="num mono">0.371 ± 0.046</td><td class="num mono">15.0%</td><td class="num mono">27.0%</td></tr>
+            <tr class="winner"><td>C — clean data, log target</td><td class="num mono">394.7 ± 12.1</td><td class="num mono">0.310 ± 0.045</td><td class="num mono">13.3%</td><td class="num mono">27.2%</td></tr>
+            <tr><td>D — clean, log, scaled</td><td class="num mono">396.6 ± 14.8</td><td class="num mono">0.300 ± 0.055</td><td class="num mono">15.3%</td><td class="num mono">25.6%</td></tr>
+            <tr class="tuned"><td>Tuned LightGBM on C</td><td class="num mono">381.4 ± 19.9</td><td class="num mono">0.334 ± 0.051</td><td class="num mono">13.9%</td><td class="num mono">26.5%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Best hyperparameters found</h3>
+      <p class="mono" style="font-size:0.82rem;color:var(--ink-muted)">n_estimators=300, learning_rate=0.02, num_leaves=31, max_depth=8, min_child_samples=20, subsample=0.8, colsample_bytree=1.0, reg_lambda=1.0, reg_alpha=1.0</p>
+      <p style="font-size:0.87rem">Search: 40 candidates × 3-fold (1m14s). Notably, config B (raw target, R²=0.371) actually beat the "winning" config C on R² — C only won on mean MAE, the metric the search optimizes for. At ~1,100 rows this is the most data-starved segment; treat all its numbers as low-confidence, tuned or not.</p>
+    </div>
+  </details>
+</section>
+
+<section class="block">
+  <div class="section-head"><span class="section-num">05</span><h2>Recommendations</h2></div>
+  <div class="rec-list">
+    <div class="rec">
+      <div class="rec-tag"><span class="pill good">apply now</span></div>
+      <div class="rec-body"><b>Add the 3-step cleaning pass to <code class="mono">scripts/train_avm_model.py</code></b><span>Exclude <code class="mono">geo_category = 'foreign'</code>, enforce a segment-specific minimum area, trim the target's 0.5%/99.5% tails — before the stratified split. This is the highest-confidence, lowest-effort change here: it fixed every segment, most dramatically industrial.</span></div>
+    </div>
+    <div class="rec">
+      <div class="rec-tag"><span class="pill good">apply now</span></div>
+      <div class="rec-body"><b>Adopt the tuned hyperparameters found per segment</b><span>Concrete params listed above for each. Biggest payoff for residential (only there did tuning move R² meaningfully); for the other four, treat it as a small free win rather than the main event.</span></div>
+    </div>
+    <div class="rec">
+      <div class="rec-tag"><span class="pill warn">skip / defer</span></div>
+      <div class="rec-body"><b>Don't adopt log-transform as a blanket default</b><span>Once cleaned, none of the 5 segments showed a consistent, meaningful MAE improvement from log1p — the perceived skew was mostly the outlier contamination, not real. If anything is kept, let the training script pick B vs. C by CV score per segment automatically rather than hardcoding one choice.</span></div>
+    </div>
+    <div class="rec">
+      <div class="rec-tag"><span class="pill neutral">confirmed, no action</span></div>
+      <div class="rec-body"><b>Feature scaling is a non-issue for LightGBM, as expected</b><span>Config C vs. D differed only at noise level in all 5 segments — empirically confirms tree models don't need standardized numeric inputs. No further work here.</span></div>
+    </div>
+    <div class="rec">
+      <div class="rec-tag"><span class="pill neutral">future work</span></div>
+      <div class="rec-body"><b>Re-run full GridSearchCV tuning only periodically, not on every retrain</b><span>4 of 5 segments saw tuning cost far outweigh its benefit once data was clean. Reserve the ~19-minute tuning pass for a quarterly cadence; let routine retrains reuse the last tuned params with fresh data.</span></div>
+    </div>
+    <div class="rec">
+      <div class="rec-tag"><span class="pill neutral">future work</span></div>
+      <div class="rec-body"><b>Consider target/mean-encoding for neighborhood</b><span><code class="mono">title_geo_2_model</code> has 300–3,100 distinct values depending on segment — one-hot spreads that signal thin. Not tested in this round; a plausible next lever specifically for residential and retail.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="section-head"><span class="section-num">06</span><h2>Honest caveats</h2></div>
+  <p>These are imot.bg <b>asking</b> prices, not closed transaction prices — some MAE floor is structural and won't move no matter how much cleaning or tuning happens. Residential's 43% within-±10% (up from 36%) is a real improvement, not a finished AVM. Hospitality and, to a lesser extent, office and industrial are working with a few thousand rows or fewer — their CV std bands are wide enough that month-to-month retraining will show real number movement that isn't model regression, just small-sample noise. And this was one random seed per config — the relative story (cleaning >> tuning >> transform/scaling) is robust, but exact numbers would shift a few points under a different seed.</p>
+</section>
+
+<footer class="page">
+  Exploratory run only — models/avm/, avm_models table, and scripts/train_avm_model.py were not modified. Full harness and raw results.json available in the session scratchpad.
+</footer>
+
+</div>

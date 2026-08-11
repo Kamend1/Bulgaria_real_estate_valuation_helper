@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import joblib
 import numpy as np
 import pandas as pd
+from catboost import CatBoostRegressor
 from lightgbm import LGBMRegressor
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -41,7 +42,8 @@ from app.config import settings
 from app.db.base import engine
 from app.db.models import AvmModel
 from app.db.session import db_session
-from utils.ml.avm_features import CATEGORICAL_COLS, NUMERIC_COLS, SEGMENT_PROPERTY_TYPES
+from utils.ml.avm_features import CATEGORICAL_COLS, NUMERIC_COLS, SEGMENT_PROPERTY_TYPES, prep_for_catboost
+from utils.ml.text_features import fit_tfidf_svd, text_feature_columns, transform_tfidf_svd
 
 # Per-segment LightGBM hyperparameters from RandomizedSearchCV tuning
 # (25-40 candidates x 3-fold CV, run against cleaned live-DB data — see the
@@ -105,6 +107,41 @@ TARGET_TRIM_BOUNDS = (0.005, 0.995)
 
 MIN_STRATUM_SIZE = 20   # strata smaller than this get folded into OTHER_SMALL_STRATA
 
+# Round 2 findings (2026-08-09, see ROUND2_findings.md): CatBoost + blending
+# beats LightGBM alone for every segment except residential (141K rows —
+# one-hot already has enough samples per category there; CatBoost's native
+# categorical handling has nothing to fix). Hyperparameters are frozen from
+# that round's RandomizedSearchCV — not retuned here, same philosophy as
+# the frozen LightGBM params above. CatBoost's ~90min/segment tuning cost
+# makes re-tuning on every retrain a non-starter; revisit periodically, not
+# automatically.
+SEGMENT_CATBOOST_PARAMS = {
+    "office":      {"iterations": 800, "depth": 10, "learning_rate": 0.05, "l2_leaf_reg": 3,  "bagging_temperature": 1.0, "random_strength": 10},
+    "retail":      {"iterations": 500, "depth": 6,  "learning_rate": 0.08, "l2_leaf_reg": 3,  "bagging_temperature": 1.0, "random_strength": 5},
+    "industrial":  {"iterations": 500, "depth": 6,  "learning_rate": 0.05, "l2_leaf_reg": 1,  "bagging_temperature": 1.0, "random_strength": 10},
+    "hospitality": {"iterations": 800, "depth": 8,  "learning_rate": 0.02, "l2_leaf_reg": 20, "bagging_temperature": 0.0, "random_strength": 5},
+    # residential deliberately absent — Round 2 found no benefit there
+}
+
+# Weight on the LightGBM (primary) prediction in the blend; companion
+# CatBoost gets (1 - weight). None = no blend, single LightGBM model only.
+SEGMENT_BLEND_WEIGHT = {
+    "residential": None, "office": 0.30, "retail": 0.70, "industrial": 0.40, "hospitality": 0.30,
+}
+
+# Round 3 findings (2026-08-10, see ROUND3_findings.md): TF-IDF+SVD-15 on
+# description_clean gives a real, consistent MAE gain everywhere except
+# office (noise-level there, excluded). For segments that are ALSO
+# blended (retail/industrial/hospitality), the text columns are added
+# symmetrically to both LightGBM and CatBoost's feature sets — the frozen
+# blend_weight above was tuned WITHOUT text features on either side, so
+# this is a reasoned simplification (both models get symmetrically richer
+# input), not a re-validated optimum. A full re-tune of blend_weight with
+# text present would be more rigorous but is new scope, not done here.
+SEGMENT_USE_TEXT_FEATURES = {
+    "residential": True, "office": False, "retail": True, "industrial": True, "hospitality": True,
+}
+
 
 def _load_segment_df(slugs: list[str]) -> pd.DataFrame:
     query = text("""
@@ -121,6 +158,7 @@ def _load_segment_df(slugs: list[str]) -> pd.DataFrame:
             geo_category,
             construction_type_model,
             features_pipe,
+            description_clean,
             price_per_sqm_model         AS price_per_sqm
         FROM listings
         WHERE training_eligible = TRUE
@@ -191,7 +229,7 @@ def _build_strata(df: pd.DataFrame) -> pd.Series:
     return strata_raw.where(strata_raw.isin(valid), "OTHER_SMALL_STRATA")
 
 
-def _build_preprocessor(binary_cols: list[str]) -> ColumnTransformer:
+def _build_preprocessor(binary_cols: list[str], text_cols: list[str] | None = None) -> ColumnTransformer:
     numeric_transformer = Pipeline(steps=[("imputer", SimpleImputer(strategy="median"))])
     categorical_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
@@ -199,7 +237,7 @@ def _build_preprocessor(binary_cols: list[str]) -> ColumnTransformer:
     ])
     return ColumnTransformer(
         transformers=[
-            ("num", numeric_transformer, NUMERIC_COLS),
+            ("num", numeric_transformer, NUMERIC_COLS + (text_cols or [])),
             ("bin", "passthrough", binary_cols),
             ("cat", categorical_transformer, CATEGORICAL_COLS),
         ],
@@ -221,9 +259,9 @@ def _evaluate(y_true, y_pred) -> dict:
     }
 
 
-def _fit_pipeline(binary_cols: list[str], X_train, y_train, lgbm_params: dict, **lgbm_kwargs) -> Pipeline:
+def _fit_pipeline(binary_cols: list[str], X_train, y_train, lgbm_params: dict, text_cols: list[str] | None = None, **lgbm_kwargs) -> Pipeline:
     pipeline = Pipeline(steps=[
-        ("preprocessor", _build_preprocessor(binary_cols)),
+        ("preprocessor", _build_preprocessor(binary_cols, text_cols)),
         ("model", LGBMRegressor(
             **lgbm_params, random_state=42, n_jobs=-1, verbosity=-1, **lgbm_kwargs,
         )),
@@ -236,6 +274,27 @@ def _predict_raw(pipeline: Pipeline, X, use_log_target: bool) -> np.ndarray:
     """Predicts and inverse-transforms back to raw EUR/sqm if the pipeline
     was fit on log1p(target)."""
     pred = pipeline.predict(X)
+    if use_log_target:
+        pred = np.expm1(pred)
+    return np.clip(pred, 1, None)
+
+
+def _fit_catboost(X_train: pd.DataFrame, y_train, catboost_params: dict, loss_function: str) -> CatBoostRegressor:
+    """CatBoost gets raw categorical strings directly (cat_features), no
+    one-hot, no imputation — that's the whole point of using it as the
+    LightGBM companion. max_ctr_complexity=1 matches Round 2's tuning
+    (avoids the categorical-combination blowup found there)."""
+    model = CatBoostRegressor(
+        **catboost_params, cat_features=CATEGORICAL_COLS, loss_function=loss_function,
+        random_seed=42, thread_count=-1, verbose=False, allow_writing_files=False,
+        max_ctr_complexity=1,
+    )
+    model.fit(prep_for_catboost(X_train), y_train)
+    return model
+
+
+def _predict_raw_catboost(model: CatBoostRegressor, X: pd.DataFrame, use_log_target: bool) -> np.ndarray:
+    pred = model.predict(prep_for_catboost(X))
     if use_log_target:
         pred = np.expm1(pred)
     return np.clip(pred, 1, None)
@@ -278,6 +337,14 @@ def train_segment(segment: str, min_rows: int) -> None:
         print(f"  SKIPPED — stratified split failed ({exc}).")
         return
 
+    # Reset indices right after the split so every DataFrame/Series derived
+    # from train_df/val_df/test_df below shares a plain contiguous index —
+    # avoids any ambiguity later when text-feature columns (built
+    # separately, then concatenated by position) are joined back on.
+    train_df = train_df.reset_index(drop=True)
+    val_df = val_df.reset_index(drop=True)
+    test_df = test_df.reset_index(drop=True)
+
     model_feature_cols = NUMERIC_COLS + CATEGORICAL_COLS + binary_cols
     target_col = "price_per_sqm"
 
@@ -285,17 +352,32 @@ def train_segment(segment: str, min_rows: int) -> None:
     X_val, y_val = val_df[model_feature_cols], val_df[target_col]
     X_test, y_test = test_df[model_feature_cols], test_df[target_col]
 
+    text_transformer = None
+    text_cols: list[str] = []
+    if SEGMENT_USE_TEXT_FEATURES.get(segment):
+        print("  fitting TF-IDF+SVD on description_clean (train split only)...")
+        text_transformer = fit_tfidf_svd(train_df["description_clean"])
+        text_cols = text_feature_columns(text_transformer)
+        text_train = transform_tfidf_svd(train_df["description_clean"], text_transformer)
+        text_val = transform_tfidf_svd(val_df["description_clean"], text_transformer)
+        text_test = transform_tfidf_svd(test_df["description_clean"], text_transformer)
+        X_train = pd.concat([X_train, text_train], axis=1)
+        X_val = pd.concat([X_val, text_val], axis=1)
+        X_test = pd.concat([X_test, text_test], axis=1)
+        model_feature_cols = model_feature_cols + text_cols
+        print(f"  text features added: {len(text_cols)}")
+
     lgbm_params = SEGMENT_LGBM_PARAMS[segment]
     use_log_target = SEGMENT_USE_LOG_TARGET[segment]
     y_train_fit = np.log1p(y_train) if use_log_target else y_train
     print(f"  target transform: {'log1p' if use_log_target else 'raw'}")
 
     print("  fitting point-estimate model...")
-    point_pipeline = _fit_pipeline(binary_cols, X_train, y_train_fit, lgbm_params, objective="regression")
+    point_pipeline = _fit_pipeline(binary_cols, X_train, y_train_fit, lgbm_params, text_cols=text_cols, objective="regression")
 
     print("  fitting quantile models (p10 / p90)...")
-    q_low_pipeline = _fit_pipeline(binary_cols, X_train, y_train_fit, lgbm_params, objective="quantile", alpha=0.1)
-    q_high_pipeline = _fit_pipeline(binary_cols, X_train, y_train_fit, lgbm_params, objective="quantile", alpha=0.9)
+    q_low_pipeline = _fit_pipeline(binary_cols, X_train, y_train_fit, lgbm_params, text_cols=text_cols, objective="quantile", alpha=0.1)
+    q_high_pipeline = _fit_pipeline(binary_cols, X_train, y_train_fit, lgbm_params, text_cols=text_cols, objective="quantile", alpha=0.9)
 
     val_metrics = _evaluate(y_val, _predict_raw(point_pipeline, X_val, use_log_target))
     print(f"  validation: MAE={val_metrics['mae']:.1f}  R2={val_metrics['r2']:.3f}  "
@@ -304,6 +386,23 @@ def train_segment(segment: str, min_rows: int) -> None:
     test_metrics = _evaluate(y_test, _predict_raw(point_pipeline, X_test, use_log_target))
     print(f"  test:       MAE={test_metrics['mae']:.1f}  R2={test_metrics['r2']:.3f}  "
           f"within10%={test_metrics['within_10_pct']:.1f}%")
+
+    blend_weight = SEGMENT_BLEND_WEIGHT.get(segment)
+    cb_point_model = cb_q_low_model = cb_q_high_model = None
+    if blend_weight is not None:
+        print("  fitting CatBoost companion (point + quantiles)...")
+        cb_params = SEGMENT_CATBOOST_PARAMS[segment]
+        cb_point_model = _fit_catboost(X_train, y_train_fit, cb_params, loss_function="RMSE")
+        cb_q_low_model = _fit_catboost(X_train, y_train_fit, cb_params, loss_function="Quantile:alpha=0.1")
+        cb_q_high_model = _fit_catboost(X_train, y_train_fit, cb_params, loss_function="Quantile:alpha=0.9")
+
+        cb_test_pred = _predict_raw_catboost(cb_point_model, X_test, use_log_target)
+        lgbm_test_pred = _predict_raw(point_pipeline, X_test, use_log_target)
+        blend_test_pred = blend_weight * lgbm_test_pred + (1 - blend_weight) * cb_test_pred
+        blend_metrics = _evaluate(y_test, blend_test_pred)
+        print(f"  blend (w_lgbm={blend_weight}): MAE={blend_metrics['mae']:.1f}  R2={blend_metrics['r2']:.3f}  "
+              f"within10%={blend_metrics['within_10_pct']:.1f}%")
+        test_metrics = {**test_metrics, "blend": blend_metrics}
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     model_dir = Path(settings.avm_models_dir) / segment / timestamp
@@ -315,6 +414,20 @@ def train_segment(segment: str, min_rows: int) -> None:
     joblib.dump(point_pipeline, model_path)
     joblib.dump(q_low_pipeline, q_low_path)
     joblib.dump(q_high_pipeline, q_high_path)
+
+    cb_model_path = cb_q_low_path = cb_q_high_path = None
+    if cb_point_model is not None:
+        cb_model_path = model_dir / "catboost_model.joblib"
+        cb_q_low_path = model_dir / "catboost_q_low.joblib"
+        cb_q_high_path = model_dir / "catboost_q_high.joblib"
+        joblib.dump(cb_point_model, cb_model_path)
+        joblib.dump(cb_q_low_model, cb_q_low_path)
+        joblib.dump(cb_q_high_model, cb_q_high_path)
+
+    text_transformer_path = None
+    if text_transformer is not None:
+        text_transformer_path = model_dir / "text_transformer.joblib"
+        joblib.dump(text_transformer, text_transformer_path)
     print(f"  saved to {model_dir}")
 
     with db_session() as session:
@@ -340,6 +453,12 @@ def train_segment(segment: str, min_rows: int) -> None:
             quantile_high_path=str(q_high_path),
             is_active=True,
             target_transform="log1p" if use_log_target else "raw",
+            companion_algorithm="catboost" if cb_point_model is not None else None,
+            companion_model_path=str(cb_model_path) if cb_model_path else None,
+            companion_quantile_low_path=str(cb_q_low_path) if cb_q_low_path else None,
+            companion_quantile_high_path=str(cb_q_high_path) if cb_q_high_path else None,
+            blend_weight=blend_weight,
+            text_transformer_path=str(text_transformer_path) if text_transformer_path else None,
         ))
 
     print(f"  activated new {segment} model.")

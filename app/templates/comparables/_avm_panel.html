@@ -10,6 +10,9 @@
     {% if avm.model_trained_at %}
       &nbsp;·&nbsp; Модел обучен на {{ avm.model_trained_at.strftime('%d.%m.%Y') }}
     {% endif %}
+    {% if avm.blended %}
+      &nbsp;·&nbsp; LightGBM + CatBoost (комбиниран)
+    {% endif %}
     {% if avm.metrics and avm.metrics.test %}
       &nbsp;·&nbsp; Точност: в рамките на ±10% за {{ avm.metrics.test.within_10_pct | round(0) | int }}%
       от тестовите обяви (MAE {{ avm.metrics.test.mae | round(0) | int | format_number }} EUR/кв.м)

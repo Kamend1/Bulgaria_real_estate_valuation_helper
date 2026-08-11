@@ -289,6 +289,20 @@ class AvmModel(Base):
     is_active = Column(Boolean, nullable=False, default=False)
     notes = Column(Text)
 
+    # Optional second model blended with this row's primary algorithm.
+    # blend_weight = weight on THIS row's algorithm; companion gets
+    # (1 - blend_weight). NULL means "single model, no blend" — the
+    # default for every segment unless explicitly configured otherwise.
+    companion_algorithm = Column(Text)
+    companion_model_path = Column(Text)
+    companion_quantile_low_path = Column(Text)
+    companion_quantile_high_path = Column(Text)
+    blend_weight = Column(Numeric(4, 3))
+
+    # TF-IDF+SVD transformer fit on training descriptions (Round 3).
+    # NULL for segments where it showed no benefit (office).
+    text_transformer_path = Column(Text)
+
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 

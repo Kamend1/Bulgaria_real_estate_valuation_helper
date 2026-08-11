@@ -131,3 +131,17 @@ def build_feature_row(db: Session, report, feature_columns: list[str]) -> pd.Dat
             row[col] = 0
 
     return pd.DataFrame([row])[list(feature_columns)]
+
+
+def prep_for_catboost(row: pd.DataFrame, categorical_cols: list[str] = CATEGORICAL_COLS) -> pd.DataFrame:
+    """
+    CatBoost needs categorical columns as non-null strings (it handles NaN
+    numerics natively, but not NaN categoricals passed via cat_features).
+    build_feature_row()'s output is otherwise already CatBoost-ready — it
+    never one-hot-encodes, that only happens inside the LightGBM sklearn
+    Pipeline's ColumnTransformer, not in this module.
+    """
+    row = row.copy()
+    for c in categorical_cols:
+        row[c] = row[c].fillna("missing").astype(str)
+    return row
