@@ -568,6 +568,7 @@ def update_subject(db: Session, report_id: uuid.UUID, data: dict) -> None:
         "subject_floor", "subject_total_floors", "subject_construction",
         "subject_year", "subject_description", "valuation_date",
         "subject_property_type", "subject_geo_category", "subject_neighborhood",
+        "subject_cadastral_id",
     )
     for f in fields:
         if f in data:
@@ -608,6 +609,20 @@ def update_sales_approach(
     if concluded_value_sales is not None:
         report.concluded_value_sales = round(concluded_value_sales, 2)
         report.concluded_value_sales_source = source
+    db.commit()
+
+
+def update_legal_description(
+    db: Session,
+    report_id: uuid.UUID,
+    text: str | None,
+    source: str = "manual",
+) -> None:
+    report = db.get(AppraisalReport, report_id)
+    if not report:
+        return
+    report.legal_description = text or None
+    report.legal_description_source = source if text else None
     db.commit()
 
 

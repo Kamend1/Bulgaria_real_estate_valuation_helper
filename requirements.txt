@@ -31,3 +31,12 @@ pyarrow==24.0.0
 lightgbm==4.7.0
 catboost==1.2.10
 scikit-learn==1.9.0
+
+# ── GIS / spatial (utils/gis — AGKK cadastral + municipal zoning lookups) ─────
+# Installs fine via plain pip on Windows (verified) — no GDAL/conda needed,
+# because the app only reprojects/measures geometry client-side (shapely +
+# pyproj); it never reads/writes GIS file formats (shapefile, GPKG), which is
+# the part of the spatial stack (fiona/GDAL) that's actually painful on
+# Windows. Don't add geopandas/fiona here unless something starts needing them.
+shapely==2.1.2
+pyproj==3.7.2

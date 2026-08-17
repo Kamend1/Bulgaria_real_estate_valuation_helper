@@ -90,6 +90,10 @@
         <input type="text" name="subject_neighborhood" value="{{ report.subject_neighborhood or '' }}">
       </div>
       <div class="form-group">
+        <label>Кадастрален идентификатор <span class="income-hint">ЕКАТТЕ.масив.имот, напр. 68134.1234.567</span></label>
+        <input type="text" name="subject_cadastral_id" value="{{ report.subject_cadastral_id or '' }}" placeholder="68134.1234.567">
+      </div>
+      <div class="form-group">
         <label>Етаж</label>
         <input type="number" name="subject_floor" value="{{ report.subject_floor or '' }}">
       </div>
@@ -198,6 +202,8 @@
 </p>
 
 {% include "comparables/_avm_panel.html" %}
+
+{% include "comparables/_cadastre_panel.html" %}
 
 {% include "comparables/_income_analysis.html" %}
 

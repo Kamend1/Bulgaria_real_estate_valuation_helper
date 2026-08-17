@@ -1,0 +1,233 @@
+{# Cadastre panel — AGKK parcel/building data + generated legal land-plot description #}
+
+<section class="income-panel card" id="cadastre-panel">
+  <h2>Кадастър и правно описание на имота</h2>
+
+  {% if cadastre.ok %}
+  {% set parcel = cadastre.parcel %}
+  <p class="hint" style="margin-bottom:1rem">
+    Данни от АГКК (INSPIRE) към {{ parcel.source.queried_at.strftime('%d.%m.%Y %H:%M') }}
+  </p>
+
+  <div class="value-block">
+    <div class="value-card">
+      <div class="value-method">Поземлен имот</div>
+      <div class="value-formula">{{ parcel.cadastral_id }}</div>
+      <div class="value-result">{{ parcel.area_sqm | format_number if parcel.area_sqm else '—' }}</div>
+      <div class="value-diff">кв.м по АГКК</div>
+    </div>
+    <div class="value-card">
+      <div class="value-method">Сгради в имота</div>
+      <div class="value-formula">по данни на АГКК</div>
+      <div class="value-result">{{ cadastre.buildings | length }}</div>
+      <div class="value-diff">
+        {% if cadastre.buildings %}
+          общо {{ cadastre.total_building_area_sqm | round(1) }} кв.м застроена площ
+        {% else %}
+          няма регистрирани сгради
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if cadastre.sketch_svg %}
+  <div style="margin-top:1rem;max-width:420px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+    {{ cadastre.sketch_svg | safe }}
+  </div>
+  {% endif %}
+
+  <div style="margin-top:1.5rem;border-top:1px solid var(--border);padding-top:1rem">
+    <h3 style="margin:0 0 0.5rem">Устройствена зона (ОУП на София)</h3>
+    {% set zoning = cadastre.zoning %}
+    {% if zoning.confidence == 'exact_match' %}
+    <p class="hint" style="margin-bottom:0.5rem">
+      {{ zoning.zone_code }}{% if zoning.plan_name %} · {{ zoning.plan_name }}{% endif %}
+    </p>
+    <div class="value-block">
+      <div class="value-card">
+        <div class="value-method">Плътност на застрояване</div>
+        <div class="value-result">{{ zoning.max_density_pct if zoning.max_density_pct is not none else '—' }}</div>
+        <div class="value-diff">%</div>
+      </div>
+      <div class="value-card">
+        <div class="value-method">КИНТ</div>
+        <div class="value-result">{{ zoning.max_kint if zoning.max_kint is not none else '—' }}</div>
+        <div class="value-diff">коефициент на интензивност</div>
+      </div>
+      <div class="value-card">
+        <div class="value-method">Мин. озеленена площ</div>
+        <div class="value-result">{{ zoning.min_landscaping_pct if zoning.min_landscaping_pct is not none else '—' }}</div>
+        <div class="value-diff">%</div>
+      </div>
+      {% if zoning.max_height_m is not none %}
+      <div class="value-card">
+        <div class="value-method">Кота корниз</div>
+        <div class="value-result">{{ zoning.max_height_m }}</div>
+        <div class="value-diff">м</div>
+      </div>
+      {% endif %}
+    </div>
+    {% if zoning.zone_description %}
+    <p class="hint" style="margin-top:0.5rem">{{ zoning.zone_description }}</p>
+    {% endif %}
+    {% elif zoning.confidence == 'not_found' %}
+    <p class="hint">Няма данни за ОУП зониране в тази точка (извън картирания обхват на плана или терен без определена устройствена зона).</p>
+    {% else %}
+    <p class="hint">Справката за устройствена зона не бе успешна в момента — опитайте да презаредите страницата.</p>
+    {% endif %}
+    <p class="hint" style="margin-top:0.4rem;font-size:0.78rem">
+      Източник: isofmap.bg (ГИС София) — само индикативно, не заменя официална скица/виза за проектиране.
+    </p>
+  </div>
+
+  {% if cadastre.highlighted_building_id %}
+  <p class="hint" style="margin-top:0.5rem">
+    Въведеният идентификатор сочи конкретна сграда в този имот — маркирана по-долу.
+  </p>
+  {% endif %}
+
+  {% if cadastre.buildings %}
+  <table class="comp-table" style="margin-top:1rem">
+    <thead>
+      <tr>
+        <th>Идентификатор на сграда</th>
+        <th>Етажи</th>
+        <th>Жилища</th>
+        <th>Площ (изчислена, кв.м)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in cadastre.buildings %}
+      <tr {% if b.cadastral_id == cadastre.highlighted_building_id %}style="font-weight:600;background:var(--brand-light,rgba(255,200,0,0.15))"{% endif %}>
+        <td>{{ b.cadastral_id }}{% if b.cadastral_id == cadastre.highlighted_building_id %} ←{% endif %}</td>
+        <td>{{ b.floors_above_ground if b.floors_above_ground is not none else '—' }}</td>
+        <td>{{ b.dwellings if b.dwellings is not none else '—' }}</td>
+        <td>{{ b.area_sqm | round(1) if b.area_sqm is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if cadastre.highlighted_building_id and cadastre.highlighted_building_id not in cadastre.buildings | map(attribute='cadastral_id') | list %}
+  <p class="hint">
+    ⚠ Сграда {{ cadastre.highlighted_building_id }} не бе намерена сред сградите на АГКК за този имот
+    (възможно е идентификаторът да сочи самостоятелен обект — апартамент/офис — вътре в сграда,
+    а не самата сграда; данни за самостоятелни обекти не се предоставят от тази безплатна услуга на АГКК).
+  </p>
+  {% endif %}
+  {% endif %}
+
+  {% if cadastre.legal %}
+  <div class="form-group" style="margin-top:1rem">
+    <label for="legal-desc-textarea">
+      Правно описание на имота
+      <span class="income-hint">генерирано автоматично от данни на АГКК — може да редактирате преди запис</span>
+    </label>
+    <textarea id="legal-desc-textarea" name="legal_description_preview" rows="4" style="width:100%">{{ cadastre.legal.text_bg }}</textarea>
+  </div>
+
+  {% if cadastre.legal.neighbours %}
+  <p class="hint">
+    Съседни имоти ({{ cadastre.legal.neighbours | length }}):
+    {% for n in cadastre.legal.neighbours %}{{ n.cadastral_id }}{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+
+  <div class="approach-save-bar" style="margin-top:0.75rem">
+    {% if report.legal_description %}
+    <div class="approach-saved-notice">
+      Закачено в доклада
+      {% if report.legal_description_source %}
+        &nbsp;·&nbsp; източник: {{ 'АГКК (автоматично)' if report.legal_description_source == 'agkk' else 'ръчно редактирано' }}
+      {% endif %}
+    </div>
+    {% endif %}
+    <form method="post" action="/comparables/save-legal-description" id="legal-desc-form" class="approach-save-row">
+      <input type="hidden" name="legal_description" id="legal-desc-hidden" value="{{ cadastre.legal.text_bg }}">
+      <input type="hidden" name="source" id="legal-desc-source" value="agkk">
+      <button type="submit" class="btn-primary" style="white-space:nowrap">Закачи към доклада</button>
+    </form>
+  </div>
+
+  <script>
+  (function () {
+    var textarea = document.getElementById('legal-desc-textarea');
+    var hidden = document.getElementById('legal-desc-hidden');
+    var source = document.getElementById('legal-desc-source');
+    if (!textarea) return;
+    var original = textarea.value;
+    textarea.addEventListener('input', function () {
+      hidden.value = textarea.value;
+      source.value = (textarea.value === original) ? 'agkk' : 'manual';
+    });
+  }());
+  </script>
+  {% else %}
+  <p class="hint" style="margin-top:1rem">
+    Данните за имота са заредени, но генерирането на правното описание не бе успешно
+    (проблем при извличане на съседни имоти от АГКК). Опитайте да презаредите страницата.
+  </p>
+  {% endif %}
+
+  <div style="margin-top:1.5rem;border-top:1px solid var(--border);padding-top:1rem">
+    <h3 style="margin:0 0 0.5rem">Свързани устройствени планове (НАГ София)</h3>
+    {% if cadastre.development_plans is none %}
+    <p class="hint">Справката в НАГ София не бе успешна в момента — опитайте да презаредите страницата.</p>
+    {% elif cadastre.development_plans | length == 0 %}
+    <p class="hint">Няма намерени преписки в НАГ София, отнасящи се до имот {{ parcel.cadastral_id }}.</p>
+    {% else %}
+    <p class="hint" style="margin-bottom:0.5rem">
+      {{ cadastre.development_plans | length }} преписк{{ 'а' if cadastre.development_plans | length == 1 else 'и' }}
+      за ПУП/ИПРЗ/виза за проектиране, отнасящи се до този имот:
+    </p>
+    {% for dp in cadastre.development_plans %}
+    <div style="padding:0.6rem 0;border-bottom:1px solid var(--border)">
+      <div style="font-weight:600">{{ dp.reference }}</div>
+      {% if dp.office %}<div class="hint">{{ dp.office }}</div>{% endif %}
+      <div class="hint">{{ dp.scope_text }}</div>
+      {% if dp.procedure_type %}<div class="hint">{{ dp.procedure_type }}</div>{% endif %}
+      {% if dp.documents %}
+      <div style="margin-top:0.3rem">
+        {% for doc in dp.documents %}
+        <a href="{{ doc.url }}" target="_blank" rel="noopener" style="margin-right:0.75rem;font-size:0.85rem">📄 {{ doc.name }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+
+  {% else %}
+
+  <div class="badge badge-warn" style="display:inline-block;margin-bottom:0.75rem">
+    {% if cadastre.reason == 'missing_cadastral_id' %}
+      Не е въведен кадастрален идентификатор
+    {% elif cadastre.reason == 'invalid_format' %}
+      Невалиден формат на идентификатора
+    {% elif cadastre.reason == 'agkk_error' %}
+      Грешка при връзка с АГКК
+    {% else %}
+      Кадастрални данни не са налични
+    {% endif %}
+  </div>
+
+  {% if cadastre.reason == 'missing_cadastral_id' %}
+  <p class="hint">
+    Въведете кадастрален идентификатор (ЕКАТТЕ.масив.имот, напр. 68134.1234.567, или
+    ЕКАТТЕ.масив.имот.сграда за конкретна сграда) в секция „Оценяван имот“ по-горе, за да
+    заредим данни от АГКК за парцела, сградите в него и съседните имоти.
+  </p>
+  {% elif cadastre.reason == 'invalid_format' %}
+  <p class="hint">
+    Идентификаторът трябва да е във формат ЕКАТТЕ.масив.имот (напр. 68134.1234.567) или,
+    за конкретна сграда, ЕКАТТЕ.масив.имот.сграда (напр. 68134.1234.567.1).
+  </p>
+  {% elif cadastre.reason == 'agkk_error' %}
+  <p class="hint">
+    {{ cadastre.detail or 'Услугата на АГКК не отговори или идентификаторът не бе намерен.' }}
+    Проверете дали идентификаторът е верен (напр. 68134.1234.567) и опитайте отново.
+  </p>
+  {% endif %}
+
+  {% endif %}
+</section>

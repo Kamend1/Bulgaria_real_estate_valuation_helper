@@ -11,7 +11,7 @@ from app.db.models import AppraisalReport, ComparablePool, User
 from app.db.session import get_db
 from app.dependencies import require_auth as get_current_user
 from app.templating import templates
-from app.services import avm_service
+from app.services import avm_service, gis_service
 from app.services.comparable_service import (
     MAX_PINNED,
     add_to_pool,
@@ -28,6 +28,7 @@ from app.services.comparable_service import (
     remove_from_pool,
     toggle_pin,
     update_income_approach,
+    update_legal_description,
     update_pool_adjustment,
     update_residual_approach,
     update_sales_approach,
@@ -102,6 +103,7 @@ async def comparables_page(
     pool_sale = get_pool_with_stats(db, "sale", report.id)
     pool_rent = get_pool_with_stats(db, "rent", report.id)
     avm = avm_service.predict_sales_value(db, report)
+    cadastre = gis_service.get_cadastre_panel_data(report)
     property_type_groups = [
         (SEGMENT_DISPLAY_NAMES[segment], [(slug, PROPERTY_TYPE_DISPLAY.get(slug, slug)) for slug in slugs])
         for segment, slugs in SEGMENT_PROPERTY_TYPES.items()
@@ -114,6 +116,7 @@ async def comparables_page(
             "pool_sale": pool_sale,
             "pool_rent": pool_rent,
             "avm": avm,
+            "cadastre": cadastre,
             "property_type_groups": property_type_groups,
             "geo_categories": GEO_CATEGORIES,
             "segment_display_names": SEGMENT_DISPLAY_NAMES,
@@ -220,6 +223,7 @@ async def save_subject(
     subject_property_type: str = Form(""),
     subject_geo_category: str = Form(""),
     subject_neighborhood: str = Form(""),
+    subject_cadastral_id: str = Form(""),
 ):
     def _int(v): return int(v) if v.strip() else None
     def _float(v): return float(v) if v.strip() else None
@@ -242,6 +246,7 @@ async def save_subject(
         "subject_property_type": subject_property_type,
         "subject_geo_category": subject_geo_category,
         "subject_neighborhood": subject_neighborhood,
+        "subject_cadastral_id": subject_cadastral_id.strip(),
     })
     return RedirectResponse(url="/comparables/", status_code=303)
 
@@ -297,6 +302,23 @@ async def save_sales_approach(
         source=source if source in ("avm", "manual") else "manual",
     )
     return RedirectResponse(url="/comparables/#avm-panel", status_code=303)
+
+
+@router.post("/save-legal-description")
+async def save_legal_description(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    legal_description: str = Form(""),
+    source: str = Form("agkk"),
+):
+    report = _active_report(request, db, user)
+    update_legal_description(
+        db, report.id,
+        text=legal_description.strip(),
+        source=source if source in ("agkk", "manual") else "manual",
+    )
+    return RedirectResponse(url="/comparables/#cadastre-panel", status_code=303)
 
 
 @router.post("/save-residual")

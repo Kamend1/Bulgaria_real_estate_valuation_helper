@@ -197,9 +197,13 @@ class AppraisalReport(Base):
     subject_property_type = Column(Text)        # taxonomy slug, e.g. "dvustaen" | "ofis"
     subject_geo_category = Column(Text)          # one of map_geo_category's 8 buckets
     subject_neighborhood = Column(Text)          # matches listings.title_geo_2_model
+    subject_cadastral_id = Column(Text)           # AGKK ПИ identifier, e.g. "68134.1234.567"
 
     concluded_value_sales = Column(Numeric(14, 2))
     concluded_value_sales_source = Column(String(20))   # avm | manual
+
+    legal_description = Column(Text)              # generated (utils.gis) or manually edited
+    legal_description_source = Column(String(20))  # agkk | manual
 
     annual_rent_estimate = Column(Numeric(14, 2))
     gross_rent_multiplier = Column(Numeric(6, 3))
