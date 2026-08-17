@@ -265,6 +265,45 @@ python -m scripts.train_avm_model --segment office   # само един сег�
 
 Всеки сегмент с под `min_row_threshold` training-eligible обяви **не получава модел** — не се публикува low-confidence прогноза. Активирането на нов модел е атомарно per-сегмент (не засяга останалите сегменти).
 
+### Съхранение на моделите (DVC)
+
+`models/avm/` (~270 MB — trained `.joblib` артефакти за всички сегменти) **не се качва в git** — версионира се отделно с [DVC](https://dvc.org). Git пази само малкия pointer файл (`models/avm.dvc`, MD5 + размер); реалните тегла живеят в **Cloudflare R2** (S3-съвместим), bucket `bg-real-estate-helper`, под `dvc-store/`.
+
+```bash
+# след git clone — изтегля активните .joblib файлове от remote-а
+dvc pull
+
+# след ново трениране (scripts/train_avm_model.py записва в models/avm/)
+dvc add models/avm
+git add models/avm.dvc
+git commit -m "Retrain AVM models"
+dvc push
+```
+
+**Еднократна настройка на remote-а** (вече направена в този repo — за нова машина/clone credentials-ите се задават локално, не идват през git):
+
+```bash
+dvc remote add -d storage s3://bg-real-estate-helper/dvc-store
+dvc remote modify storage endpointurl https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
+# credentials НЕ отиват в git-tracked config — само в .dvc/config.local (gitignored):
+dvc remote modify --local storage access_key_id <access-key>
+dvc remote modify --local storage secret_access_key <secret-key>
+```
+
+Стойностите за `.dvc/config.local` идват от `.env` (`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`) — вижте `.env.example`.
+
+### Резервно копие на базата данни + MLflow (`scripts/backup_to_r2.py`)
+
+`pg_dump` на PostgreSQL базата и снимка на текущия `mlflow_tracking/mlflow.db` се качват в същия R2 bucket, но **без DVC** — MLflow-ската SQLite база се презаписва вътрешно при всеки run, така че content-addressable версиониране не носи полза (всяка промяна би съхранила пълно нов файл, не delta). Обикновен, timestamp-иран upload е достатъчен:
+
+```bash
+python -m scripts.backup_to_r2                  # и двете
+python -m scripts.backup_to_r2 --skip-pgdump     # само mlflow.db
+python -m scripts.backup_to_r2 --skip-mlflow     # само pg_dump
+```
+
+Качва в `s3://bg-real-estate-helper/backups/pgdump/` и `.../backups/mlflow/`, като локалният `.dump` файл остава и в `backups/` (както досегашната ръчна практика); локалната mlflow snapshot копия се трие след успешен upload.
+
 ---
 
 ## Кадастър и устройствено планиране (GIS модул)
@@ -326,13 +365,16 @@ pip install -r requirements.txt
 # 4. Миграции
 alembic upgrade head
 
-# 5. Първи администраторски акаунт
+# 5. Изтегляне на трениран AVM модели (DVC — вижте секцията по-долу)
+dvc pull
+
+# 6. Първи администраторски акаунт
 python -m scripts.create_admin
 
-# 6. Еднократен импорт на исторически данни (опционален)
+# 7. Еднократен импорт на исторически данни (опционален)
 python -m scripts.import_historical_data
 
-# 7. Стартиране
+# 8. Стартиране
 uvicorn app.main:app --reload
 ```
 
@@ -396,14 +438,17 @@ uvicorn app.main:app --reload
 │   ├── run_scrape.py                        # standalone scrape subprocess
 │   ├── import_historical_data.py            # еднократен import от parquet
 │   ├── train_avm_model.py                   # тренировка на AVM (всички/1 сегмент)
-│   └── lookup_parcel.py                     # CLI за GIS справки
+│   ├── lookup_parcel.py                     # CLI за GIS справки
+│   └── backup_to_r2.py                      # pg_dump + mlflow.db -> Cloudflare R2
 │
 ├── docs/
 │   ├── avm_experiments/                     # AVM методология и намерения по рундове
 │   └── gis_cadastral/                       # GIS reverse-engineering документация
 │
 ├── alembic/                                 # DB миграции
-├── models/                                  # gitignored — трениран AVM артефакти
+├── models/                                  # .joblib съдържанието е gitignored — DVC-tracked
+│   └── avm.dvc                              # git-tracked DVC pointer (MD5 + размер)
+├── .dvc/                                    # DVC конфигурация (remote, cache)
 ├── mlflow_tracking/                         # gitignored — MLflow SQLite backend
 ├── backups/                                 # gitignored — pg_dump архиви
 ├── static/                                  # CSS

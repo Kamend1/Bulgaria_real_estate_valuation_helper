@@ -40,3 +40,11 @@ scikit-learn==1.9.0
 # Windows. Don't add geopandas/fiona here unless something starts needing them.
 shapely==2.1.2
 pyproj==3.7.2
+
+# ── Model artifact versioning (models/avm/ — see README's "Съхранение на
+# AVM моделите" section) ──────────────────────────────────────────────────────
+dvc==3.67.1
+dvc-s3==3.3.0
+
+# ── R2 backups (scripts/backup_to_r2.py — pg_dump + mlflow.db -> Cloudflare R2) ─
+boto3==1.43.0

@@ -1,0 +1,6 @@
+outs:
+- md5: 01a00201993d65c95185c3b390904550.dir
+  size: 279819800
+  nfiles: 98
+  hash: md5
+  path: avm

@@ -1,0 +1,6 @@
+[core]
+    analytics = false
+    remote = storage
+['remote "storage"']
+    url = s3://bg-real-estate-helper/dvc-store
+    endpointurl = https://00eeba1a3c4c969a02aa14f83b7979ac.r2.cloudflarestorage.com

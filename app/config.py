@@ -22,5 +22,13 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production-use-long-random-string"
     admin_email: str = ""  # email that auto-receives admin role on first registration
 
+    # Cloudflare R2 (S3-compatible) — optional, only needed for
+    # scripts.backup_to_r2 and as the DVC remote for models/avm.
+    r2_account_id: str = ""
+    r2_endpoint_url: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = ""
+
 
 settings = Settings()
