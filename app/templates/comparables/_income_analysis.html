@@ -1,6 +1,9 @@
 {# Income approach analysis panel — rendered below the comparables tabs #}
 {% set rent_median  = pool_rent.stats.median  if pool_rent.stats else '' %}
 {% set sale_median  = pool_sale.stats.median  if pool_sale.stats else '' %}
+{% set rent_q25     = pool_rent.stats.p25     | float if pool_rent.stats else 0 %}
+{% set rent_q75     = pool_rent.stats.p75     | float if pool_rent.stats else 0 %}
+{% set rent_median_f = pool_rent.stats.median | float if pool_rent.stats else 0 %}
 
 <section class="income-panel card" id="income-panel">
   <h2>Доходен анализ</h2>
@@ -149,6 +152,20 @@
     </div>
   </div>
 
+  <!-- ── Full-width sensitivity table ─────────────────────── -->
+  <div class="sens-wrap" id="inc-sens-wrap" style="display:none">
+    <h4>Таблица за чувствителност — стойност EUR/кв.м (директна капитализация)</h4>
+    <p class="hint" style="margin:0.15rem 0 0.6rem" id="inc-sens-note">
+      Редове: Cap Rate (±20% от базата) &nbsp;·&nbsp; Колони: наем/кв.м/мес
+    </p>
+    <div style="overflow-x:auto">
+      <table class="sens-table">
+        <thead id="inc-sens-thead"></thead>
+        <tbody id="inc-sens-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ── Save to report ─────────────────────────────────── -->
   <div class="approach-save-bar">
     {% if report.concluded_value_income %}
@@ -202,6 +219,9 @@ function _fmt(n) { return n > 0 ? Math.round(n).toLocaleString('bg') + ' EUR/к�
 function _pct(n) { return n > 0 ? n.toFixed(2) + ' %' : '—'; }
 
 var _incVals = { direct: 0, dcf: 0, rent: 0, capRate: 0 };
+var INC_RENT_Q25    = {{ rent_q25 }};
+var INC_RENT_MEDIAN = {{ rent_median_f }};
+var INC_RENT_Q75    = {{ rent_q75 }};
 
 function updateIncomeSave() {
   var method = (document.getElementById('save-inc-method') || {}).value || 'direct';
@@ -238,6 +258,7 @@ function calcIncome() {
     ['res-gross-yield','res-net-yield','res-noi','res-direct','res-dcf'].forEach(
       id => document.getElementById(id).textContent = '—'
     );
+    document.getElementById('inc-sens-wrap').style.display = 'none';
     return;
   }
 
@@ -293,6 +314,85 @@ function calcIncome() {
   ).join('');
   document.getElementById('dcf-tv').textContent    = Math.round(pvTV);
   document.getElementById('dcf-total').textContent = Math.round(dcfVal);
+
+  // Sensitivity table -- rows: cap rate ±20%/±10%/base, columns: rent from
+  // the rental pool's Q25/median/Q75 when available (same pattern as the
+  // residual panel's sensitivity table), else ±10%/20% around the current input.
+  const CAP_VARIANTS = [-0.2, -0.1, 0, 0.1, 0.2];
+  const CAP_LABELS   = ['−20%', '−10%', 'База', '+10%', '+20%'];
+
+  const usePoolRent = INC_RENT_Q25 > 0 && INC_RENT_MEDIAN > 0 && INC_RENT_Q75 > 0;
+  let rentVars, rentLabels;
+  if (usePoolRent) {
+    rentVars = [
+      INC_RENT_Q25,
+      (INC_RENT_Q25 + INC_RENT_MEDIAN) / 2,
+      INC_RENT_MEDIAN,
+      (INC_RENT_MEDIAN + INC_RENT_Q75) / 2,
+      INC_RENT_Q75
+    ];
+    rentLabels = [
+      'Q25 (' + INC_RENT_Q25.toFixed(1) + ')',
+      'Q25↔Med (' + ((INC_RENT_Q25 + INC_RENT_MEDIAN) / 2).toFixed(1) + ')',
+      'Медиана (' + INC_RENT_MEDIAN.toFixed(1) + ')',
+      'Med↔Q75 (' + ((INC_RENT_MEDIAN + INC_RENT_Q75) / 2).toFixed(1) + ')',
+      'Q75 (' + INC_RENT_Q75.toFixed(1) + ')'
+    ];
+  } else {
+    rentVars   = CAP_VARIANTS.map(v => rent * (1 + v));
+    rentLabels = CAP_LABELS;
+  }
+  const capVars = CAP_VARIANTS.map(v => Math.max(0.001, capRate * (1 + v)));
+
+  function _directValFor(r, cr) {
+    const aRent = r * 12;
+    const n = aRent * effectivePct;
+    return cr > 0 ? n / cr : 0;
+  }
+
+  const allVals = [];
+  const matrix = capVars.map(cr => rentVars.map(r => {
+    const v = _directValFor(r, cr);
+    allVals.push(v);
+    return v;
+  }));
+
+  function _sensColor(val, vals) {
+    const mx = Math.max.apply(null, vals), mn = Math.min.apply(null, vals);
+    const t = (mx > mn) ? (val - mn) / (mx - mn) : 0.5;
+    const l = Math.round(97 - t * 33);
+    return 'hsl(210,55%,' + l + '%)';
+  }
+
+  const ithead = document.getElementById('inc-sens-thead');
+  const itbody = document.getElementById('inc-sens-tbody');
+  const baseColIdx = 2;
+
+  document.getElementById('inc-sens-note').textContent = usePoolRent
+    ? 'Редове: Cap Rate (±20% от базата) · Колони: наем/кв.м/мес от наемния пул (Q25 / Q25↔Med / Медиана / Med↔Q75 / Q75)'
+    : 'Редове: Cap Rate (±20% от базата) · Колони: наем/кв.м/мес · Стъпка ±10%/±20% от текущия вход';
+
+  ithead.innerHTML = '<tr><th>Cap Rate ↓ / Наем →</th>' +
+    rentLabels.map((l, i) => {
+      const isBase = i === baseColIdx;
+      return '<th' + (isBase ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' + l + '</th>';
+    }).join('') + '</tr>';
+
+  itbody.innerHTML = matrix.map((row, ri) => {
+    const isBaseRow = ri === 2;
+    return '<tr>' +
+      '<th' + (isBaseRow ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' +
+      (capVars[ri] * 100).toFixed(1) + '%</th>' +
+      row.map((val, ci) => {
+        const isBase = isBaseRow && ci === baseColIdx;
+        const bg = _sensColor(val, allVals);
+        const outline = isBase ? ';outline:2px solid var(--brand);outline-offset:-2px' : '';
+        return '<td style="background:' + bg + outline + '">' + Math.round(val).toLocaleString('bg-BG') + '</td>';
+      }).join('') +
+      '</tr>';
+  }).join('');
+
+  document.getElementById('inc-sens-wrap').style.display = '';
 }
 
 function setDiff(id, computed, market) {

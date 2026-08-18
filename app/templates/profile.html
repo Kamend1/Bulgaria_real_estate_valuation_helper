@@ -35,6 +35,11 @@
       <input type="text" name="full_name" class="form-control" value="{{ request.state.user.full_name or '' }}">
     </div>
     <div class="form-group">
+      <label>Сертификат за оценителска правоспособност (КНОБ) <span class="hint">показва се в изготвяните доклади</span></label>
+      <input type="text" name="appraiser_certificate_no" class="form-control"
+             value="{{ request.state.user.appraiser_certificate_no or '' }}" placeholder="напр. 100102183">
+    </div>
+    <div class="form-group">
       <label>Роля</label>
       <input type="text" class="form-control" value="{{ 'Администратор' if request.state.user.role == 'admin' else 'Потребител' }}" readonly style="background:var(--bg);cursor:default">
     </div>

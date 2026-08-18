@@ -114,6 +114,14 @@
         <input type="date" name="valuation_date"
                value="{{ report.valuation_date | string if report.valuation_date else '' }}">
       </div>
+      <div class="form-group">
+        <label>Цел на доклада <span class="income-hint">определя стандарт/боилърплейт текста в документа</span></label>
+        <select name="report_purpose">
+          {% for slug, label in report_purpose_options %}
+          <option value="{{ slug }}" {% if report.report_purpose == slug %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
     <div class="form-group" style="margin-top:0.5rem">
       <label>Описание / забележки</label>
@@ -160,6 +168,16 @@
       <button onclick="clearFilter('sale')" class="btn-clear btn-sm">✕ Нулирай</button>
       <span class="filter-count" id="f-cnt-sale"></span>
     </div>
+
+    <details style="margin-bottom:0.6rem" {% if report.submarket_rationale %}open{% endif %}>
+      <summary class="hint" style="cursor:pointer">Обосновка на избраната съпоставима зона / сравними</summary>
+      <form method="post" action="/comparables/save-submarket-rationale" style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:flex-start">
+        <textarea name="submarket_rationale" rows="2" style="flex:1"
+                  placeholder="Напр. защо са избрани точно тези сравними/подрайон, а не по-скъпи/евтини съседни зони">{{ report.submarket_rationale or '' }}</textarea>
+        <button type="submit" class="btn-clear btn-sm">Запази</button>
+      </form>
+    </details>
+
     {% set pool = pool_sale %}
     {% set ctype = 'sale' %}
     {% set ppsqm_label = 'EUR/кв.м' %}
@@ -208,6 +226,8 @@
 {% include "comparables/_income_analysis.html" %}
 
 {% include "comparables/_residual_analysis.html" %}
+
+{% include "comparables/_conclusion_panel.html" %}
 
 <script>
 (function () {

@@ -16,6 +16,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db.models import AppraisalReport, ComparablePool
+from app.services.analytics_service import get_market_trend
+from utils.feature_engineering import PROPERTY_TYPE_DISPLAY
 
 MAX_PINNED = 6   # max pinned-for-report per type (Word table limit)
 
@@ -31,6 +33,97 @@ _BRAND_DARK = RGBColor(0x1E, 0x3A, 0x5F)
 _BRAND_BLUE = RGBColor(0x25, 0x63, 0xEB)
 _WHITE      = RGBColor(0xFF, 0xFF, 0xFF)
 _MUTED      = RGBColor(0x64, 0x74, 0x8B)
+
+# ── Purpose-differentiated front-matter boilerplate ───────────────────────────
+# Real appraisal practice cites a different legal/accounting basis depending on
+# what the report is FOR -- a fair-value opinion for financial reporting (IFRS
+# 13 / IAS 16 / IAS 36) is legally a different thing from a valuation backing
+# a non-cash capital contribution (чл. 72 ТЗ), which even ends with a clause
+# neither of the other purposes need (computing a share count from the value).
+# "market_opinion" is the default and matches this app's original,
+# purpose-agnostic behavior -- no standard is cited unless the appraiser
+# explicitly says the report is for one of the other two purposes.
+_PURPOSE_TEXTS: dict[str, dict[str, str]] = {
+    "market_opinion": {
+        "label": "Обща пазарна консултация",
+        "cel": (
+            "Настоящият доклад е изготвен по конкретно възлагане с цел подпомагане на "
+            "възложителя при определяне на пазарната стойност на описания имот. "
+            "Докладът не е обвързан с конкретен счетоводен или нормативен стандарт и "
+            "не следва да се използва за целите на финансова отчетност, съдебно "
+            "производство или прехвърляне на собственост без изрично потвърждение от "
+            "страна на оценителя."
+        ),
+        "standart": (
+            "Оценката представлява становище на оценителя за пазарната стойност на "
+            "имота — най-вероятната цена, по която имотът би могъл да бъде продаден на "
+            "свободния пазар между желаещи купувач и продавач, при обичайни пазарни "
+            "условия и без принуда от страна на нито една от страните, към датата на "
+            "оценката."
+        ),
+    },
+    "fair_value_ifrs": {
+        "label": "Справедлива стойност (МСФО 13 / МСС 16 / МСС 36)",
+        "cel": (
+            "Целта на настоящата оценка е определяне на справедливата стойност на "
+            "описания имот към датата на оценка, в съответствие с изискванията на "
+            "Международен стандарт за финансово отчитане 13 (МСФО 13) и Международни "
+            "счетоводни стандарти 16 и 36 (МСС 16, МСС 36), за да послужи на "
+            "възложителя за целите на счетоводното отчитане на активите."
+        ),
+        "standart": (
+            "В оценителския доклад се съблюдават изискванията на възприетите "
+            "международни стандарти за финансова отчетност (МСФО 13) и международни "
+            "счетоводни стандарти (МСС 16 и МСС 36). Справедливата стойност се определя "
+            "като цената, която би била получена при продажба на актива или платена при "
+            "прехвърлянето на задължение при обичайна сделка между пазарни участници "
+            "към датата на оценката."
+        ),
+    },
+    "noncash_contribution": {
+        "label": "Непарична вноска (чл. 72, ал. 2 ТЗ)",
+        "cel": (
+            "Целта на настоящото становище е определяне на пазарната стойност на "
+            "описания недвижим имот, който следва да послужи като непарична вноска в "
+            "капитала на дружество, в съответствие с изискванията на чл. 72, ал. 2 от "
+            "Търговския закон и чл. 123 от Наредба № 1 от 14.02.2007 г. за водене, "
+            "съхраняване и достъп до търговския регистър."
+        ),
+        "standart": (
+            "Оценката е изготвена съгласно приложимите Български стандарти за "
+            "оценяване, приети от Камарата на независимите оценители в България. "
+            "Определената стойност представлява пазарната стойност на имота към датата "
+            "на оценка и служи единствено за целите на удостоверяване на съответствието "
+            "на непаричната вноска с размера на записания дружествен дял, съгласно чл. "
+            "72, ал. 2 от Търговския закон."
+        ),
+    },
+}
+
+def get_purpose_options() -> list[tuple[str, str]]:
+    """[(slug, display_label), ...] for the report_purpose <select> --
+    "market_opinion" first since it's the default."""
+    order = ["market_opinion", "fair_value_ifrs", "noncash_contribution"]
+    return [(slug, _PURPOSE_TEXTS[slug]["label"]) for slug in order]
+
+
+_LIMITING_CONDITIONS_TEXT = (
+    "Настоящата оценка представлява становище на оценителя, изготвено с "
+    "необходимата грижа и въз основа на предоставената и обществено достъпна "
+    "информация към датата на оценка. Не е извършена независима проверка на "
+    "правния статут на имота — правото на собственост се приема за валидно и "
+    "необременено, освен ако изрично не е посочено друго. Предоставената от "
+    "възложителя информация се приема за достоверна, без тя да е била "
+    "самостоятелно верифицирана. Не е извършван оглед за скрити дефекти, "
+    "конструктивни проблеми или замърсяване на почвата — оценката не "
+    "представлява техническа или екологична експертиза. Оценителят не носи "
+    "отговорност за промени в пазарните условия, настъпили след датата на "
+    "оценка. Докладът е изготвен за целта, посочена по-горе, и не следва да се "
+    "използва за друга цел без изричното писмено съгласие на оценителя. "
+    "Оценителят и свързаните с него лица нямат настоящ или бъдещ имуществен "
+    "интерес към оценявания имот, а възнаграждението за изготвяне на доклада "
+    "не е обвързано с заключената стойност."
+)
 
 # Column widths (cm) for the 11-column comparables table — total = 16.5 cm (A4 portrait)
 _COMP_COL_WIDTHS = [0.7, 3.8, 1.2, 1.6, 1.6, 1.4, 0.9, 1.0, 1.0, 1.5, 1.8]
@@ -236,6 +329,80 @@ def _write_comp_table(
             _set_cell_bg(cell, "EFF6FF")
 
 
+def _write_adjustment_breakdown_table(doc: Document, pinned: list[dict]) -> None:
+    """Supplementary table showing the named-factor breakdown (F4/Tier 3) for
+    whichever pinned comparables use structured adjustment_factors instead of
+    a single blended %. Kept separate from the main comparable table (which
+    stays at its existing 11 columns, sized for A4 portrait) rather than
+    adding factor columns there."""
+    factored = [item for item in pinned if item.get("adjustment_factors")]
+    if not factored:
+        return
+
+    doc.add_paragraph()
+    p_title = doc.add_paragraph()
+    r_title = p_title.add_run("Разбивка на корекциите по фактори")
+    r_title.bold = True
+    r_title.font.size = Pt(10)
+
+    factor_keys = list(ADJUSTMENT_FACTOR_LABELS.keys())
+    headers = ["Местоположение"] + [ADJUSTMENT_FACTOR_LABELS[k] for k in factor_keys] + ["Общо"]
+
+    tbl = doc.add_table(rows=1, cols=len(headers))
+    tbl.style = "Table Grid"
+    hdr = tbl.rows[0]
+    for cell, text_ in zip(hdr.cells, headers):
+        _fill_cell(cell, text_, bold=True, pt=8, color=_WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _set_cell_bg(cell, "1E3A5F")
+
+    for item in factored:
+        row = tbl.add_row()
+        location = (
+            f"{item.get('title_city_model') or ''} {item.get('title_geo_2_model') or ''}"
+        ).strip()
+        factors = item["adjustment_factors"]
+        vals = [location] + [
+            (f"{factors[k]:+g}%" if k in factors else "—") for k in factor_keys
+        ] + [f"{item.get('adjustment_pct', 0):+g}%"]
+        for cell, val in zip(row.cells, vals):
+            _fill_cell(cell, val, pt=8)
+
+
+def _market_context_paragraph(db: Session, report: AppraisalReport) -> str | None:
+    """Short, data-grounded market-context sentence for the sales-approach
+    section, built from the app's own scraped listings (analytics_service's
+    materialized-view trend) filtered to the subject's own segment -- not
+    external macro data, which the app has no source for. Returns None if
+    the subject isn't classified enough yet, or there's no trend data."""
+    if not report.subject_geo_category or not report.subject_property_type:
+        return None
+
+    trend = get_market_trend(
+        db, deal_type="sale",
+        geo_category=report.subject_geo_category,
+        property_type_slug=report.subject_property_type,
+        n_runs=6,
+    )
+    if not trend or not trend[-1].get("median_ppsqm"):
+        return None
+
+    latest = trend[-1]
+    type_label = PROPERTY_TYPE_DISPLAY.get(report.subject_property_type, report.subject_property_type)
+    text_out = (
+        f"Пазарен контекст: към {latest['run_date']} медианната пазарна цена за сегмент "
+        f"„{type_label}“, гео-категория „{report.subject_geo_category}“, е "
+        f"{round(latest['median_ppsqm'])} EUR/кв.м (на база {latest['n_listings']} обяви)."
+    )
+    first = trend[0]
+    if len(trend) >= 2 and first.get("median_ppsqm"):
+        change_pct = (latest["median_ppsqm"] - first["median_ppsqm"]) / first["median_ppsqm"] * 100
+        text_out += (
+            f" За периода {first['run_date']} – {latest['run_date']} медианата се "
+            f"измени с {change_pct:+.1f}%."
+        )
+    return text_out
+
+
 # ── Word / DOCX report generation ────────────────────────────────────────────
 
 def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
@@ -333,8 +500,61 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
 
     doc.add_page_break()
 
-    # ── Section 1: Subject property ───────────────────────────────
-    h1 = doc.add_heading("1. Описание на оценявания имот", level=1)
+    # ── Въведение (unnumbered, precedes the numbered sections below) ──────
+    purpose_texts = _PURPOSE_TEXTS.get(report.report_purpose, _PURPOSE_TEXTS["market_opinion"])
+    appraiser = report.owner if report.owner else None
+
+    h_intro = doc.add_heading("Въведение", level=1)
+    if h_intro.runs:
+        h_intro.runs[0].font.color.rgb = _BRAND_DARK
+
+    def _intro_block(title: str, body: str) -> None:
+        p_title = doc.add_paragraph()
+        r_title = p_title.add_run(title)
+        r_title.bold = True
+        r_title.font.size = Pt(10.5)
+        p_body = doc.add_paragraph(body)
+        p_body.runs[0].font.size = Pt(10)
+        doc.add_paragraph()
+
+    subject_line = f"{report.subject_address or ''}, {report.subject_city or ''}".strip(", ") or "описания имот"
+    _intro_block(
+        "Предмет на заданието",
+        f"Оценка на пазарната стойност на недвижим имот, находящ се на {subject_line}"
+        + (f" (кадастрален идентификатор {report.subject_cadastral_id})" if report.subject_cadastral_id else "")
+        + ".",
+    )
+    _intro_block("Цел на оценката", purpose_texts["cel"])
+    _intro_block("Стандарт и база на стойността", purpose_texts["standart"])
+
+    appraiser_name = (appraiser.full_name or appraiser.username) if appraiser else None
+    appraiser_cert = appraiser.appraiser_certificate_no if appraiser else None
+    p_decl_title = doc.add_paragraph()
+    r_decl_title = p_decl_title.add_run("Декларация за независимост")
+    r_decl_title.bold = True
+    r_decl_title.font.size = Pt(10.5)
+    for line in [
+        "не е свързано лице с възложителя или собственика на оценявания имот;",
+        "няма настоящ или бъдещ имуществен интерес, свързан с обекта на оценката;",
+        "възнаграждението за изготвяне на доклада не е обвързано с заключената стойност.",
+    ]:
+        p_line = doc.add_paragraph(f"•  {line}", style=None)
+        p_line.runs[0].font.size = Pt(10)
+    if appraiser_name:
+        p_app = doc.add_paragraph()
+        r_app_lbl = p_app.add_run("Изготвил оценката: ")
+        r_app_lbl.bold = True
+        r_app_lbl.font.size = Pt(10)
+        cert_suffix = f" (сертификат № {appraiser_cert})" if appraiser_cert else ""
+        r_app_val = p_app.add_run(f"{appraiser_name}{cert_suffix}")
+        r_app_val.font.size = Pt(10)
+
+    doc.add_page_break()
+
+    section_num = 1
+
+    # ── Section: Subject property ───────────────────────────────
+    h1 = doc.add_heading(f"{section_num}. Описание на оценявания имот", level=1)
     if h1.runs:
         h1.runs[0].font.color.rgb = _BRAND_DARK
 
@@ -373,13 +593,49 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
 
     doc.add_paragraph()
 
-    # ── Section 2: Sales comparables ──────────────────────────────
-    h2 = doc.add_heading("2. Пазарен подход — продажни сравними", level=1)
+    # ── Section: Legal & zoning status (conditional on GIS data present) ──
+    if report.legal_description:
+        section_num += 1
+        h_legal = doc.add_heading(f"{section_num}. Правно и градоустройствено състояние", level=1)
+        if h_legal.runs:
+            h_legal.runs[0].font.color.rgb = _BRAND_DARK
+        p_legal = doc.add_paragraph(report.legal_description)
+        p_legal.runs[0].font.size = Pt(10)
+        if report.subject_cadastral_id:
+            p_cad = doc.add_paragraph()
+            r_cad_lbl = p_cad.add_run("Кадастрален идентификатор: ")
+            r_cad_lbl.bold = True
+            r_cad_lbl.font.size = Pt(9)
+            r_cad_val = p_cad.add_run(report.subject_cadastral_id)
+            r_cad_val.font.size = Pt(9)
+        doc.add_paragraph()
+
+    # ── Section: Sales comparables ──────────────────────────────
+    section_num += 1
+    h2 = doc.add_heading(f"{section_num}. Пазарен подход — продажни сравними", level=1)
     if h2.runs:
         h2.runs[0].font.color.rgb = _BRAND_DARK
 
+    market_ctx = _market_context_paragraph(db, report)
+    if market_ctx:
+        p_ctx = doc.add_paragraph(market_ctx)
+        p_ctx.runs[0].italic = True
+        p_ctx.runs[0].font.size = Pt(9)
+        p_ctx.runs[0].font.color.rgb = _MUTED
+        doc.add_paragraph()
+
+    if report.submarket_rationale:
+        p_sr_lbl = doc.add_paragraph()
+        r_sr_lbl = p_sr_lbl.add_run("Обосновка на съпоставимата зона: ")
+        r_sr_lbl.bold = True
+        r_sr_lbl.font.size = Pt(9.5)
+        r_sr_txt = p_sr_lbl.add_run(report.submarket_rationale)
+        r_sr_txt.font.size = Pt(9.5)
+        doc.add_paragraph()
+
     if pinned_sale:
         _write_comp_table(doc, pinned_sale, "sale", report, pool_sale["stats"])
+        _write_adjustment_breakdown_table(doc, pinned_sale)
     else:
         p_no = doc.add_paragraph("Няма закачени (\U0001F4CC) продажни сравними за доклада.")
         p_no.runs[0].italic = True
@@ -397,15 +653,17 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
         r_cs.font.size = Pt(11)
         r_cs.font.color.rgb = _BRAND_DARK
 
-    # ── Section 3: Rent comparables (if any) ──────────────────────
+    # ── Section: Rent comparables (if any) ──────────────────────
     if pinned_rent or pool_rent["total_count"] > 0:
+        section_num += 1
         doc.add_paragraph()
-        h3 = doc.add_heading("3. Доходен подход — наемни сравними", level=1)
+        h3 = doc.add_heading(f"{section_num}. Доходен подход — наемни сравними", level=1)
         if h3.runs:
             h3.runs[0].font.color.rgb = _BRAND_DARK
 
         if pinned_rent:
             _write_comp_table(doc, pinned_rent, "rent", report, pool_rent["stats"])
+            _write_adjustment_breakdown_table(doc, pinned_rent)
         else:
             p_no2 = doc.add_paragraph("Няма закачени (\U0001F4CC) наемни сравними за доклада.")
             p_no2.runs[0].italic = True
@@ -422,16 +680,20 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
             r_ci.font.size = Pt(11)
             r_ci.font.color.rgb = _BRAND_DARK
 
-    # ── Section 4 (or 3): Concluded value ────────────────────────
-    conc_num = 4 if (pinned_rent or pool_rent["total_count"] > 0) else 3
+    # ── Section: Concluded value ────────────────────────
+    section_num += 1
+    conc_num = section_num
     doc.add_paragraph()
     h_conc = doc.add_heading(f"{conc_num}. Заключение — оценена стойност", level=1)
     if h_conc.runs:
         h_conc.runs[0].font.color.rgb = _BRAND_DARK
 
-    tbl_conc = doc.add_table(rows=1, cols=2)
+    tbl_conc = doc.add_table(rows=1, cols=3)
     tbl_conc.style = "Table Grid"
     tbl_conc._tbl.remove(tbl_conc.rows[0]._tr)
+
+    def _weight_str(w) -> str:
+        return f"{_fmt(w, 0)}%" if w is not None else "—"
 
     if report.concluded_value_sales:
         r = tbl_conc.add_row()
@@ -441,6 +703,7 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
             f"{_fmt(report.concluded_value_sales)} {report.concluded_currency or 'EUR'}",
             pt=10,
         )
+        _fill_cell(r.cells[2], _weight_str(report.weight_sales_pct), pt=10, align=WD_ALIGN_PARAGRAPH.CENTER)
 
     if report.concluded_value_income:
         r = tbl_conc.add_row()
@@ -450,6 +713,7 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
             f"{_fmt(report.concluded_value_income)} {report.concluded_currency or 'EUR'}",
             pt=10,
         )
+        _fill_cell(r.cells[2], _weight_str(report.weight_income_pct), pt=10, align=WD_ALIGN_PARAGRAPH.CENTER)
 
     if report.concluded_value_residual:
         r = tbl_conc.add_row()
@@ -459,11 +723,12 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
             f"{_fmt(report.concluded_value_residual)} {report.concluded_currency or 'EUR'}",
             pt=10,
         )
+        _fill_cell(r.cells[2], _weight_str(report.weight_residual_pct), pt=10, align=WD_ALIGN_PARAGRAPH.CENTER)
 
     if report.concluded_value:
         r = tbl_conc.add_row()
         _fill_cell(
-            r.cells[0], "КРАЙНА ОЦЕНЕНА СТОЙНОСТ",
+            r.cells[0], "КРАЙНА ОЦЕНЕНА СТОЙНОСТ (претеглена)",
             bold=True, pt=11, color=_WHITE, align=WD_ALIGN_PARAGRAPH.CENTER,
         )
         _fill_cell(
@@ -471,12 +736,23 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
             f"{_fmt(report.concluded_value)} {report.concluded_currency or 'EUR'}",
             bold=True, pt=11, color=_WHITE,
         )
+        _fill_cell(r.cells[2], "", pt=11, color=_WHITE)
         _set_cell_bg(r.cells[0], "1E3A5F")
         _set_cell_bg(r.cells[1], "1E3A5F")
+        _set_cell_bg(r.cells[2], "1E3A5F")
     elif not (report.concluded_value_sales or report.concluded_value_income):
         p_nv = doc.add_paragraph("Крайната оценена стойност не е въведена.")
         p_nv.runs[0].italic = True
         p_nv.runs[0].font.size = Pt(10)
+
+    if report.weighting_rationale:
+        doc.add_paragraph()
+        p_wr = doc.add_paragraph()
+        r_wr_lbl = p_wr.add_run("Обосновка на теглата: ")
+        r_wr_lbl.bold = True
+        r_wr_lbl.font.size = Pt(10)
+        r_wr_txt = p_wr.add_run(report.weighting_rationale)
+        r_wr_txt.font.size = Pt(10)
 
     if report.appraiser_notes:
         doc.add_paragraph()
@@ -493,6 +769,14 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
     p_knob.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_knob.runs[0].font.size = Pt(8.5)
     p_knob.runs[0].font.color.rgb = _MUTED
+
+    # ── Appendix: Limiting conditions (generic, purpose-independent) ──────
+    doc.add_page_break()
+    h_lc = doc.add_heading("Приложение — Ограничаващи условия и допускания", level=1)
+    if h_lc.runs:
+        h_lc.runs[0].font.color.rgb = _BRAND_DARK
+    p_lc = doc.add_paragraph(_LIMITING_CONDITIONS_TEXT)
+    p_lc.runs[0].font.size = Pt(9.5)
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -573,6 +857,11 @@ def update_subject(db: Session, report_id: uuid.UUID, data: dict) -> None:
     for f in fields:
         if f in data:
             setattr(report, f, data[f] if data[f] != "" else None)
+    # report_purpose is NOT NULL -- unlike the fields above, an empty
+    # submitted value must be ignored (keep the existing/default value)
+    # rather than nulled out.
+    if data.get("report_purpose"):
+        report.report_purpose = data["report_purpose"]
     db.commit()
 
 
@@ -626,6 +915,14 @@ def update_legal_description(
     db.commit()
 
 
+def update_submarket_rationale(db: Session, report_id: uuid.UUID, text: str | None) -> None:
+    report = db.get(AppraisalReport, report_id)
+    if not report:
+        return
+    report.submarket_rationale = text or None
+    db.commit()
+
+
 def update_residual_approach(
     db: Session,
     report_id: uuid.UUID,
@@ -636,6 +933,55 @@ def update_residual_approach(
         return
     if concluded_value_residual is not None:
         report.concluded_value_residual = round(concluded_value_residual, 2)
+    db.commit()
+
+
+def compute_weighted_conclusion(
+    concluded_value_sales: float | None,
+    concluded_value_income: float | None,
+    concluded_value_residual: float | None,
+    weight_sales_pct: float | None,
+    weight_income_pct: float | None,
+    weight_residual_pct: float | None,
+) -> float | None:
+    """Normalized weighted average of whichever approaches have BOTH a
+    saved value and a positive weight -- normalized (divided by the sum of
+    weights actually used) so the weights don't need to add up to exactly
+    100 for a sane result, matching how an appraiser might leave one
+    approach's weight blank rather than force the other two to compensate."""
+    pairs = [
+        (concluded_value_sales, weight_sales_pct),
+        (concluded_value_income, weight_income_pct),
+        (concluded_value_residual, weight_residual_pct),
+    ]
+    used = [(v, w) for v, w in pairs if v is not None and w is not None and w > 0]
+    if not used:
+        return None
+    total_weight = sum(w for _, w in used)
+    return round(sum(v * w for v, w in used) / total_weight, 2)
+
+
+def update_conclusion(
+    db: Session,
+    report_id: uuid.UUID,
+    weight_sales_pct: float | None,
+    weight_income_pct: float | None,
+    weight_residual_pct: float | None,
+    weighting_rationale: str | None,
+) -> None:
+    report = db.get(AppraisalReport, report_id)
+    if not report:
+        return
+    report.weight_sales_pct = weight_sales_pct
+    report.weight_income_pct = weight_income_pct
+    report.weight_residual_pct = weight_residual_pct
+    report.weighting_rationale = weighting_rationale or None
+    report.concluded_value = compute_weighted_conclusion(
+        float(report.concluded_value_sales) if report.concluded_value_sales is not None else None,
+        float(report.concluded_value_income) if report.concluded_value_income is not None else None,
+        float(report.concluded_value_residual) if report.concluded_value_residual is not None else None,
+        weight_sales_pct, weight_income_pct, weight_residual_pct,
+    )
     db.commit()
 
 
@@ -726,14 +1072,38 @@ def toggle_pin(db: Session, pool_id: int) -> bool:
     return item.pinned_for_report
 
 
+ADJUSTMENT_FACTOR_LABELS: dict[str, str] = {
+    "market":    "Пазарни условия",
+    "location":  "Местоположение",
+    "size":      "Площ",
+    "floor":     "Етаж",
+    "condition": "Строителство / състояние",
+}
+
+
 def update_pool_adjustment(
-    db: Session, pool_id: int, adjustment_pct: float | None, analyst_note: str
+    db: Session,
+    pool_id: int,
+    adjustment_pct: float | None,
+    analyst_note: str,
+    adjustment_factors: dict[str, float] | None = None,
 ) -> None:
+    """When adjustment_factors is given (even an empty dict clears factor
+    mode), adjustment_pct is DERIVED as their sum and the explicit
+    adjustment_pct argument is ignored -- keeps the two representations from
+    silently disagreeing. Passing adjustment_factors=None (the default)
+    preserves the older single-blended-% entry mode untouched."""
     item = db.get(ComparablePool, pool_id)
-    if item:
+    if not item:
+        return
+    if adjustment_factors is not None:
+        cleaned = {k: v for k, v in adjustment_factors.items() if v}
+        item.adjustment_factors = cleaned or None
+        item.adjustment_pct = round(sum(cleaned.values()), 2) if cleaned else None
+    else:
         item.adjustment_pct = adjustment_pct
-        item.analyst_note = analyst_note or None
-        db.commit()
+    item.analyst_note = analyst_note or None
+    db.commit()
 
 
 # ── Pool query + statistics ───────────────────────────────────────────────────
@@ -747,6 +1117,7 @@ def get_pool_with_stats(
             cp.id AS pool_id,
             cp.pinned_for_report,
             cp.adjustment_pct,
+            cp.adjustment_factors,
             cp.analyst_note,
             cp.added_at,
             l.id AS listing_id,

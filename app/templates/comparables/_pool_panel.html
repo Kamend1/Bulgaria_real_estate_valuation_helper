@@ -130,26 +130,42 @@
         {% else %}—{% endif %}
       </td>
 
-      <!-- Adjustment + note -->
-      <td style="min-width:80px">
-        <form hx-post="/comparables/adjustment/{{ item.pool_id }}"
-              hx-target="#pool-panel-{{ ctype }}"
-              hx-swap="outerHTML">
-          <input type="number" step="0.1" name="adjustment_pct"
-                 value="{{ item.adjustment_pct if item.adjustment_pct else '' }}"
-                 style="width:60px;text-align:right"
-                 onchange="this.form.requestSubmit()">
+      <!-- Adjustment -->
+      <td style="min-width:90px">
+        {% if item.adjustment_factors %}
+          <div style="text-align:right;font-weight:600">{{ item.adjustment_pct }}%</div>
+          <button type="button" class="btn-clear btn-sm" style="font-size:0.68rem;padding:1px 4px"
+                  onclick="toggleAdjRow({{ item.pool_id }})">✎ корекции</button>
+        {% else %}
+          <form hx-post="/comparables/adjustment/{{ item.pool_id }}"
+                hx-target="#pool-panel-{{ ctype }}"
+                hx-swap="outerHTML">
+            <input type="hidden" name="mode" value="simple">
+            <input type="hidden" name="analyst_note" value="{{ item.analyst_note or '' }}">
+            <input type="number" step="0.1" name="adjustment_pct"
+                   value="{{ item.adjustment_pct if item.adjustment_pct else '' }}"
+                   style="width:60px;text-align:right"
+                   onchange="this.form.requestSubmit()">
+          </form>
+          <button type="button" class="btn-clear btn-sm" style="font-size:0.68rem;padding:1px 4px"
+                  onclick="toggleAdjRow({{ item.pool_id }})">+ по фактори</button>
+        {% endif %}
       </td>
       <td style="text-align:right;font-weight:600">
         {{ item.adj_ppsqm | int if item.adj_ppsqm else '—' }}
       </td>
       <td>
+        <form hx-post="/comparables/adjustment/{{ item.pool_id }}"
+              hx-target="#pool-panel-{{ ctype }}"
+              hx-swap="outerHTML">
+          <input type="hidden" name="mode" value="simple">
+          <input type="hidden" name="adjustment_pct" value="{{ item.adjustment_pct if item.adjustment_pct else '' }}">
           <input type="text" name="analyst_note"
                  value="{{ item.analyst_note or '' }}"
                  style="width:120px"
                  placeholder="бележка"
                  onchange="this.form.requestSubmit()">
-          </form>
+        </form>
       </td>
 
       <!-- Remove -->
@@ -158,6 +174,36 @@
               hx-target="#pool-panel-{{ ctype }}"
               hx-swap="outerHTML">
           <button class="btn-remove" title="Премахни">✕</button>
+        </form>
+      </td>
+    </tr>
+
+    <!-- Factor breakdown row (hidden by default, toggled by "по фактори"/"✎ корекции") -->
+    <tr class="adj-factor-row" id="adj-factor-row-{{ item.pool_id }}" style="display:none">
+      <td colspan="11" style="background:var(--bg-alt,#f8fafc);padding:0.5rem 0.75rem">
+        <form hx-post="/comparables/adjustment/{{ item.pool_id }}"
+              hx-target="#pool-panel-{{ ctype }}"
+              hx-swap="outerHTML"
+              style="display:flex;flex-wrap:wrap;gap:0.6rem;align-items:flex-end">
+          <input type="hidden" name="mode" value="factors">
+          <input type="hidden" name="analyst_note" value="{{ item.analyst_note or '' }}">
+          {% for key, label in adjustment_factor_labels.items() %}
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">{{ label }}</label>
+            <input type="number" step="0.1" name="adj_{{ key }}" class="adj-factor-input"
+                   data-pool-id="{{ item.pool_id }}"
+                   value="{{ item.adjustment_factors.get(key) if item.adjustment_factors else '' }}"
+                   style="width:70px;text-align:right" oninput="calcAdjTotal({{ item.pool_id }})">
+          </div>
+          {% endfor %}
+          <div class="income-group" style="margin-bottom:0">
+            <label class="income-label">Общо</label>
+            <div class="res-computed" id="adj-total-{{ item.pool_id }}">
+              {{ item.adjustment_pct ~ '%' if item.adjustment_pct else '0%' }}
+            </div>
+          </div>
+          <button type="submit" class="btn-primary btn-sm">Запази корекциите</button>
+          <button type="button" class="btn-clear btn-sm" onclick="toggleAdjRow({{ item.pool_id }})">Затвори</button>
         </form>
       </td>
     </tr>
@@ -175,5 +221,24 @@
 
 <div class="pool-pagination" id="pool-pag-{{ ctype }}"></div>
 
-<script>if (window.initPool) window.initPool('{{ ctype }}');</script>
+<script>
+window.toggleAdjRow = function (poolId) {
+  var row = document.getElementById('adj-factor-row-' + poolId);
+  if (!row) return;
+  row.style.display = (row.style.display === 'none') ? '' : 'none';
+};
+
+window.calcAdjTotal = function (poolId) {
+  var inputs = document.querySelectorAll('.adj-factor-input[data-pool-id="' + poolId + '"]');
+  var total = 0;
+  inputs.forEach(function (el) {
+    var v = parseFloat(el.value);
+    if (!isNaN(v)) total += v;
+  });
+  var el = document.getElementById('adj-total-' + poolId);
+  if (el) el.textContent = (Math.round(total * 10) / 10) + '%';
+};
+
+if (window.initPool) window.initPool('{{ ctype }}');
+</script>
 </div>

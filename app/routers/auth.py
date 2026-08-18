@@ -168,6 +168,7 @@ async def profile_update(
     full_name: str = Form(default="", max_length=255),
     email: EmailStr = Form(..., max_length=255),
     username: str = Form(..., max_length=100),
+    appraiser_certificate_no: str = Form(default="", max_length=100),
 ):
     user = request.state.user
     if not user:
@@ -193,6 +194,7 @@ async def profile_update(
     db_user.email = email.lower().strip()
     db_user.username = username.strip()
     db_user.full_name = full_name.strip() or None
+    db_user.appraiser_certificate_no = appraiser_certificate_no.strip() or None
     db.commit()
     return RedirectResponse(url="/auth/profile?saved=1", status_code=302)
 

@@ -14,6 +14,7 @@ from app.dependencies import require_auth as get_current_user
 from app.templating import templates
 from app.services import avm_service, gis_service
 from app.services.comparable_service import (
+    ADJUSTMENT_FACTOR_LABELS,
     MAX_PINNED,
     add_to_pool,
     clear_pool,
@@ -22,23 +23,28 @@ from app.services.comparable_service import (
     finalize_user_report,
     generate_docx,
     get_or_create_draft,
+    get_purpose_options,
     get_pool_with_stats,
     get_report_for_user,
     get_user_reports,
     new_draft,
     remove_from_pool,
     toggle_pin,
+    update_conclusion,
     update_income_approach,
     update_legal_description,
     update_pool_adjustment,
     update_residual_approach,
     update_sales_approach,
     update_subject,
+    update_submarket_rationale,
 )
 from utils.feature_engineering import PROPERTY_TYPE_DISPLAY
 from utils.ml.avm_features import GEO_CATEGORIES, SEGMENT_DISPLAY_NAMES, SEGMENT_PROPERTY_TYPES
 
 router = APIRouter(prefix="/comparables", tags=["comparables"])
+
+_VALID_REPORT_PURPOSES = {slug for slug, _ in get_purpose_options()}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,6 +76,7 @@ def _panel_response(request: Request, db: Session, ctype: str, report_id: uuid.U
             "report_id": str(report_id),
             "ppsqm_label": "EUR/кв.м" if ctype == "sale" else "EUR/кв.м/мес",
             "MAX_PINNED": MAX_PINNED,
+            "adjustment_factor_labels": ADJUSTMENT_FACTOR_LABELS,
         },
     )
 
@@ -125,7 +132,9 @@ async def comparables_page(
             "property_type_groups": property_type_groups,
             "geo_categories": GEO_CATEGORIES,
             "segment_display_names": SEGMENT_DISPLAY_NAMES,
+            "report_purpose_options": get_purpose_options(),
             "MAX_PINNED": MAX_PINNED,
+            "adjustment_factor_labels": ADJUSTMENT_FACTOR_LABELS,
         },
     )
 
@@ -196,15 +205,38 @@ async def save_adjustment(
     user: User = Depends(get_current_user),
     adjustment_pct: str = Form("0"),
     analyst_note: str = Form(""),
+    mode: str = Form("simple"),
+    adj_market: str = Form("0"),
+    adj_location: str = Form("0"),
+    adj_size: str = Form("0"),
+    adj_floor: str = Form("0"),
+    adj_condition: str = Form("0"),
 ):
     item = _pool_item_guard(db, pool_id, user)
     ctype, report_id = item.comparable_type, item.report_id
-    adj = None
-    try:
-        adj = float(adjustment_pct) if adjustment_pct.strip() else None
-    except ValueError:
-        pass
-    update_pool_adjustment(db, pool_id, adj, analyst_note)
+
+    def _f(v: str) -> float:
+        try:
+            return float(v) if v.strip() else 0.0
+        except ValueError:
+            return 0.0
+
+    if mode == "factors":
+        factors = {
+            "market": _f(adj_market),
+            "location": _f(adj_location),
+            "size": _f(adj_size),
+            "floor": _f(adj_floor),
+            "condition": _f(adj_condition),
+        }
+        update_pool_adjustment(db, pool_id, None, analyst_note, adjustment_factors=factors)
+    else:
+        adj = None
+        try:
+            adj = float(adjustment_pct) if adjustment_pct.strip() else None
+        except ValueError:
+            pass
+        update_pool_adjustment(db, pool_id, adj, analyst_note)
     return _htmx_or_redirect(request, db, ctype, report_id)
 
 
@@ -229,6 +261,7 @@ async def save_subject(
     subject_geo_category: str = Form(""),
     subject_neighborhood: str = Form(""),
     subject_cadastral_id: str = Form(""),
+    report_purpose: str = Form(""),
 ):
     def _int(v): return int(v) if v.strip() else None
     def _float(v): return float(v) if v.strip() else None
@@ -252,6 +285,7 @@ async def save_subject(
         "subject_geo_category": subject_geo_category,
         "subject_neighborhood": subject_neighborhood,
         "subject_cadastral_id": subject_cadastral_id.strip(),
+        "report_purpose": report_purpose if report_purpose in _VALID_REPORT_PURPOSES else "",
     })
     return RedirectResponse(url="/comparables/", status_code=303)
 
@@ -297,16 +331,33 @@ async def save_sales_approach(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     concluded_value_sales: str = Form(""),
-    source: str = Form("manual"),
 ):
+    # source is always "manual" here, deliberately -- the AVM prediction is a
+    # sanity-check tool only and must never reach a value the final report
+    # can cite as the sales-approach conclusion. There used to be a
+    # source="avm" pathway wired to the AVM panel's own predicted number;
+    # it was removed at this boundary (not just hidden in the template) so
+    # it can't come back via a direct POST either.
     def _f(v): return float(v) if v.strip() else None
     report = _active_report(request, db, user)
     update_sales_approach(
         db, report.id,
         concluded_value_sales=_f(concluded_value_sales),
-        source=source if source in ("avm", "manual") else "manual",
+        source="manual",
     )
     return RedirectResponse(url="/comparables/#avm-panel", status_code=303)
+
+
+@router.post("/save-submarket-rationale")
+async def save_submarket_rationale(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    submarket_rationale: str = Form(""),
+):
+    report = _active_report(request, db, user)
+    update_submarket_rationale(db, report.id, submarket_rationale.strip())
+    return RedirectResponse(url="/comparables/#tab-content-sale", status_code=303)
 
 
 @router.post("/save-legal-description")
@@ -337,6 +388,28 @@ async def save_residual_approach(
     report = _active_report(request, db, user)
     update_residual_approach(db, report.id, concluded_value_residual=_f(concluded_value_residual))
     return RedirectResponse(url="/comparables/#residual-panel", status_code=303)
+
+
+@router.post("/save-conclusion")
+async def save_conclusion(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    weight_sales_pct: str = Form(""),
+    weight_income_pct: str = Form(""),
+    weight_residual_pct: str = Form(""),
+    weighting_rationale: str = Form(""),
+):
+    def _f(v): return float(v) if v.strip() else None
+    report = _active_report(request, db, user)
+    update_conclusion(
+        db, report.id,
+        weight_sales_pct=_f(weight_sales_pct),
+        weight_income_pct=_f(weight_income_pct),
+        weight_residual_pct=_f(weight_residual_pct),
+        weighting_rationale=weighting_rationale.strip(),
+    )
+    return RedirectResponse(url="/comparables/#conclusion-panel", status_code=303)
 
 
 @router.get("/export/excel")

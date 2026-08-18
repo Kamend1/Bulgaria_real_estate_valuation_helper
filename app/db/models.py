@@ -182,6 +182,10 @@ class AppraisalReport(Base):
     title = Column(Text, nullable=False)
     status = Column(String(20), default="draft")
     # draft | finalized | exported
+    report_purpose = Column(String(30), nullable=False, default="market_opinion")
+    # market_opinion | fair_value_ifrs | noncash_contribution -- selects which
+    # front-matter boilerplate (purpose/standard-of-value text) generate_docx()
+    # uses; see comparable_service._PURPOSE_TEXTS.
 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     owner = relationship("User", back_populates="reports")
@@ -205,11 +209,21 @@ class AppraisalReport(Base):
     legal_description = Column(Text)              # generated (utils.gis) or manually edited
     legal_description_source = Column(String(20))  # agkk | manual
 
+    submarket_rationale = Column(Text)   # why these comparables/this zone were chosen (F8)
+
     annual_rent_estimate = Column(Numeric(14, 2))
     gross_rent_multiplier = Column(Numeric(6, 3))
     capitalization_rate = Column(Numeric(6, 4))
     concluded_value_income = Column(Numeric(14, 2))
     concluded_value_residual = Column(Numeric(14, 2))
+
+    # Weight (%) each approach carries in the final concluded_value below --
+    # only approaches with both a weight and a saved concluded_value_* are
+    # included in the weighted average (see comparable_service.update_conclusion).
+    weight_sales_pct = Column(Numeric(5, 2))
+    weight_income_pct = Column(Numeric(5, 2))
+    weight_residual_pct = Column(Numeric(5, 2))
+    weighting_rationale = Column(Text)   # appraiser's written reasoning for the weights chosen
 
     concluded_value = Column(Numeric(14, 2))
     concluded_currency = Column(String(5), default="EUR")
@@ -237,6 +251,12 @@ class ComparablePool(Base):
     added_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     pinned_for_report = Column(Boolean, nullable=False, default=False)
     adjustment_pct = Column(Numeric(6, 2))
+    # Named-factor breakdown, e.g. {"market": -5, "location": 7, "size": -11,
+    # "floor": 0, "condition": 0} -- when set, adjustment_pct above is
+    # DERIVED as the sum of these and kept in sync (see
+    # comparable_service.update_pool_adjustment). Null/empty means the
+    # appraiser is using the older single-blended-% entry mode instead.
+    adjustment_factors = Column(JSONB)
     analyst_note = Column(Text)
 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -318,6 +338,7 @@ class User(Base):
     username = Column(String(100), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255))
+    appraiser_certificate_no = Column(String(100))   # КНОБ REV certificate no., shown in report front-matter
     role = Column(String(20), nullable=False, default="user")   # user | admin
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

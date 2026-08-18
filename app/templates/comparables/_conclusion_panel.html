@@ -1,0 +1,139 @@
+{# Final weighted conclusion -- combines whichever approaches have a saved
+   value into report.concluded_value, the headline number shown in the
+   exported report. Mirrors the "Резултати от оценката" + weight column
+   pattern used in professional appraisal reports (see Phase 6 plan). #}
+
+<section class="income-panel card" id="conclusion-panel">
+  <h2>Заключение — крайна оценена стойност</h2>
+  <p class="hint" style="margin-bottom:1rem">
+    Претеглете подходите, за които има закачена стойност по-горе. Теглата не е
+    задължително да сборуват точно 100% — крайната стойност се нормализира
+    спрямо сбора на въведените тегла.
+  </p>
+
+  <div style="overflow-x:auto">
+    <table class="admin-table" id="concl-table">
+      <thead>
+        <tr>
+          <th>Подход</th>
+          <th>Стойност (EUR)</th>
+          <th>Тегло (%)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Пазарен (сравними продажби)</td>
+          <td id="concl-v-sales">{{ report.concluded_value_sales | format_number if report.concluded_value_sales else '—' }}</td>
+          <td>
+            <input type="number" id="concl-w-sales" step="1" min="0" max="100"
+                   {% if not report.concluded_value_sales %}disabled{% endif %}
+                   value="{{ report.weight_sales_pct | int if report.weight_sales_pct is not none else '' }}"
+                   oninput="calcConclusion()" style="width:5rem">
+          </td>
+        </tr>
+        <tr>
+          <td>Доходен</td>
+          <td id="concl-v-income">{{ report.concluded_value_income | format_number if report.concluded_value_income else '—' }}</td>
+          <td>
+            <input type="number" id="concl-w-income" step="1" min="0" max="100"
+                   {% if not report.concluded_value_income %}disabled{% endif %}
+                   value="{{ report.weight_income_pct | int if report.weight_income_pct is not none else '' }}"
+                   oninput="calcConclusion()" style="width:5rem">
+          </td>
+        </tr>
+        <tr>
+          <td>Остатъчен (стойност на парцела)</td>
+          <td id="concl-v-residual">{{ report.concluded_value_residual | format_number if report.concluded_value_residual else '—' }}</td>
+          <td>
+            <input type="number" id="concl-w-residual" step="1" min="0" max="100"
+                   {% if not report.concluded_value_residual %}disabled{% endif %}
+                   value="{{ report.weight_residual_pct | int if report.weight_residual_pct is not none else '' }}"
+                   oninput="calcConclusion()" style="width:5rem">
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="value-block" style="margin-top:1rem">
+    <div class="value-card">
+      <div class="value-method">Претеглена крайна стойност</div>
+      <div class="value-formula">Σ(стойност × тегло) / Σ(тегло)</div>
+      <div class="value-result" id="concl-total">
+        {{ report.concluded_value | format_number if report.concluded_value else '—' }}
+      </div>
+    </div>
+  </div>
+
+  <div class="income-group" style="margin-top:1rem">
+    <label class="income-label">Обосновка на теглата <span class="income-hint">кратко, защо тези тегла</span></label>
+    <textarea id="concl-rationale" rows="2" style="width:100%">{{ report.weighting_rationale or '' }}</textarea>
+  </div>
+
+  <div class="approach-save-bar" style="margin-top:0.75rem">
+    <form method="post" action="/comparables/save-conclusion" id="conclusion-save-form" class="approach-save-row">
+      <input type="hidden" name="weight_sales_pct" id="frm-concl-w-sales">
+      <input type="hidden" name="weight_income_pct" id="frm-concl-w-income">
+      <input type="hidden" name="weight_residual_pct" id="frm-concl-w-residual">
+      <input type="hidden" name="weighting_rationale" id="frm-concl-rationale">
+      <button type="submit" class="btn-primary" style="white-space:nowrap" onclick="return prepConclusionSubmit()">
+        Запази заключение
+      </button>
+    </form>
+  </div>
+</section>
+
+<script>
+(function () {
+  'use strict';
+
+  var VALUES = {
+    sales: {{ report.concluded_value_sales or 0 }},
+    income: {{ report.concluded_value_income or 0 }},
+    residual: {{ report.concluded_value_residual or 0 }}
+  };
+
+  function _w(id) {
+    var el = document.getElementById(id);
+    var v = el ? parseFloat(el.value) : NaN;
+    return isNaN(v) ? null : v;
+  }
+
+  window.calcConclusion = function () {
+    var wSales = _w('concl-w-sales');
+    var wIncome = _w('concl-w-income');
+    var wResidual = _w('concl-w-residual');
+
+    var pairs = [
+      [VALUES.sales, wSales],
+      [VALUES.income, wIncome],
+      [VALUES.residual, wResidual]
+    ];
+    var totalWeight = 0, weightedSum = 0;
+    pairs.forEach(function (p) {
+      var v = p[0], w = p[1];
+      if (v && w !== null && w > 0) {
+        totalWeight += w;
+        weightedSum += v * w;
+      }
+    });
+
+    var el = document.getElementById('concl-total');
+    if (totalWeight > 0) {
+      el.textContent = Math.round(weightedSum / totalWeight).toLocaleString('bg-BG') + ' EUR';
+    } else {
+      el.textContent = '—';
+    }
+  };
+
+  window.prepConclusionSubmit = function () {
+    document.getElementById('frm-concl-w-sales').value = document.getElementById('concl-w-sales').value;
+    document.getElementById('frm-concl-w-income').value = document.getElementById('concl-w-income').value;
+    document.getElementById('frm-concl-w-residual').value = document.getElementById('concl-w-residual').value;
+    document.getElementById('frm-concl-rationale').value = document.getElementById('concl-rationale').value;
+    return true;
+  };
+
+  document.addEventListener('DOMContentLoaded', calcConclusion);
+}());
+</script>
