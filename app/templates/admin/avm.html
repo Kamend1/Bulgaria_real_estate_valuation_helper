@@ -2,44 +2,33 @@
 {% block title %}AVM модели — Администрация{% endblock %}
 
 {% block content %}
-<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.25rem">
-  <div>
-    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.15rem">
-      <a href="/admin/" style="color:var(--muted);text-decoration:none">← Потребители</a>
-    </div>
-    <h1 style="margin:0">AVM модели за оценка</h1>
+<div style="margin-bottom:1.25rem">
+  <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.15rem">
+    <a href="/admin/" style="color:var(--muted);text-decoration:none">← Потребители</a>
   </div>
-  <form method="post" action="/admin/avm/retrain">
-    <button type="submit" class="btn btn-primary" {% if training_active %}disabled{% endif %}>
-      {{ 'Трениране в процес…' if training_active else 'Преобучи всички сегменти' }}
-    </button>
-  </form>
+  <h1 style="margin:0">AVM модели за оценка</h1>
 </div>
 
-{% if started %}
-<div class="alert alert-success">
-  Трениране стартирано на заден план. Обновете страницата след няколко минути, за да видите резултата.
+<div class="alert" style="margin-bottom:1.25rem">
+  Преобучаването става само локално, от командния ред, от машина с достъп до R2 ключ за запис
+  (виж README, „R2 достъп и ключове“) — не и от тази страница:
+  <pre style="white-space:pre-wrap;margin:0.5rem 0 0;font-size:0.8rem">python -m scripts.train_avm_model --push-to-r2</pre>
+  <p class="hint" style="margin:0.5rem 0 0">
+    За конкретен сегмент добавете <code>--segment office</code> (или друг слъг отдолу).
+    Без <code>--push-to-r2</code> моделът се записва само локално и приложението не може да го обслужва.
+  </p>
 </div>
-{% endif %}
 
 {% for segment, models in by_segment.items() %}
 {% set active = models | selectattr('is_active') | first %}
 <div class="card" style="margin-bottom:1.25rem">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:0.75rem">
     <h2 style="margin:0">{{ segment_display_names.get(segment, segment) }}</h2>
-    <div style="display:flex;align-items:center;gap:0.5rem">
-      {% if active %}
-      <span class="badge badge-ok">Активен модел</span>
-      {% else %}
-      <span class="badge badge-warn">Няма активен модел</span>
-      {% endif %}
-      <form method="post" action="/admin/avm/retrain">
-        <input type="hidden" name="segment" value="{{ segment }}">
-        <button type="submit" class="btn btn-secondary btn-sm" {% if training_active %}disabled{% endif %}>
-          Преобучи
-        </button>
-      </form>
-    </div>
+    {% if active %}
+    <span class="badge badge-ok">Активен модел</span>
+    {% else %}
+    <span class="badge badge-warn">Няма активен модел</span>
+    {% endif %}
   </div>
 
   {% if active %}

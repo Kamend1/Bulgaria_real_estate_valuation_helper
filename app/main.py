@@ -1,29 +1,61 @@
 import logging
+import logging.handlers
 import traceback
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.db.models import User
 from app.db.session import get_db, db_session
+from app.rate_limit import limiter
 from app.routers import analytics, comparables, listings, reports, scrape
 from app.routers import auth as auth_router
 from app.routers import admin as admin_router
+from app.services.csrf import verify_csrf_token
 from app.templating import templates
+
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+_log_dir = Path(settings.log_dir)
+_log_dir.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        # 10 MB per file, keep 5 rotated backups -- bounds disk use for
+        # long-running/unattended processes instead of growing forever.
+        logging.handlers.RotatingFileHandler(
+            _log_dir / "app.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8",
+        ),
+    ],
 )
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_title)
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    message = "Твърде много опити. Изчакайте малко и опитайте отново."
+    if request.headers.get("HX-Request"):
+        return HTMLResponse(message, status_code=429)
+    return HTMLResponse(
+        f"<h2>429 — Твърде много заявки</h2><p>{message}</p><p><a href='/'>Начало</a></p>",
+        status_code=429,
+    )
 
 
 @app.middleware("http")
@@ -44,10 +76,58 @@ async def attach_current_user(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def csrf_protect(request: Request, call_next):
+    """Synchronizer-token CSRF check for every state-changing request.
+    Centralized here (rather than per-route) so a new POST route can't
+    accidentally ship unprotected. See app/services/csrf.py for how the
+    token reaches the client (meta tag + hx-headers + auto-injected
+    hidden inputs, all in base.html) — nothing else needs to change per
+    form/route as new ones are added.
+
+    Registered before SessionMiddleware's add_middleware() call below so
+    it ends up *inner* relative to it and request.session is already
+    populated by the time this runs (session presence is required to have
+    anything to compare the submitted token against)."""
+    if request.method not in _CSRF_SAFE_METHODS and not request.url.path.startswith("/static"):
+        submitted = request.headers.get("X-CSRF-Token")
+        if submitted is None:
+            try:
+                body = await request.body()
+                # BaseHTTPMiddleware hands the downstream app a *different*
+                # Request instance than this one — consuming the body here
+                # (to read the form) drains the one ASGI receive channel
+                # both share, leaving nothing for FastAPI's own Form(...)
+                # parsing to read. Re-arm it with the bytes already read so
+                # the route handler still sees a full body.
+                async def _replay_body() -> dict:
+                    return {"type": "http.request", "body": body, "more_body": False}
+                request._receive = _replay_body
+                form = await request.form()
+                submitted = form.get("csrf_token")
+            except Exception:
+                submitted = None
+        if not verify_csrf_token(request, submitted):
+            message = "Невалидна или изтекла сесийна заявка. Презаредете страницата и опитайте отново."
+            if request.headers.get("HX-Request"):
+                return HTMLResponse(message, status_code=403)
+            return HTMLResponse(
+                f"<h2>403 — Невалидна заявка (CSRF)</h2><p>{message}</p><p><a href='/'>Начало</a></p>",
+                status_code=403,
+            )
+    return await call_next(request)
+
+
 # SessionMiddleware must be outermost — registered AFTER attach_current_user
 # so Starlette places it first in the request chain and populates request.session
 # before attach_current_user reads it.
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=86400 * 7)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.secret_key,
+    max_age=86400 * 7,
+    https_only=settings.session_https_only,
+    same_site="lax",
+)
 
 
 @app.on_event("startup")

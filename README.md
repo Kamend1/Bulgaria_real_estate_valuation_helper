@@ -256,53 +256,69 @@ mlflow ui --backend-store-uri sqlite:///mlflow_tracking/mlflow.db
 
 Пълна методология и намерения по рундове — `docs/avm_experiments/`.
 
+### AVM модели и Cloudflare R2
+
+`models/avm/` (~270 MB общо между 5-те сегмента) **не се качва в git** и **не е нужен локално, за да работи приложението** — `app/services/avm_service.py` изтегля активния модел на всеки сегмент директно от Cloudflare R2 в паметта при първата заявка към него (после остава кеширан за живота на процеса, само по едно мрежово изтегляне на сегмент). Локалната директория остава единствено training-scratch за `scripts/train_avm_model.py`.
+
+### R2 достъп и ключове
+
+Два отделни ключа, никога смесвани:
+
+| Ключ | Права | Къде живее | За какво служи |
+| --- | --- | --- | --- |
+| `R2_MODELS_*` | само четене (Object Read) | `.env` на ВСЯКА пусната инстанция, вкл. на колега/клиент | `avm_service.py` чете трениран модел при прогноза |
+| `R2_MAINTAINER_*` | четене + запис | само на вашата машина, никога deploy-нат | `train_avm_model.py --push-to-r2`, `backup_to_r2.py`, `dvc push` |
+
+Причината за разделянето: `backups/` съдържа `pg_dump` с реални потребителски данни (имейли, хеширани пароли) и текст на оценъчни доклади. Read-only ключ, който изтече от deploy-ната инстанция, не бива да може да достигне до тях дори на теория — затова моделите и бекъповете живеят в **отделни bucket-и**, а не само зад различни token-и на един и същ bucket:
+
+- `bg-real-estate-helper` — `avm-models/` (предвидими ключове: `avm-models/<сегмент>/<timestamp>/model.joblib`, независими от DVC-то content-addressed оформление) + `dvc-store/`. `R2_MODELS_*` е scoped само тук.
+- `bg-real-estate-backup` (нов bucket) — `backups/pgdump/` + `backups/mlflow/`. Достижим само с `R2_MAINTAINER_*`.
+
+**`R2_MODELS_*` в `.env.example` са реални, живи стойности — умишлено.** Токенът е read-only и scoped само до `bg-real-estate-helper` (потвърдено емпирично: чете, но `put_object`/`list_objects` на бекъп bucket-а връщат `AccessDenied`) — най-лошият сценарий при злоупотреба е някой да изтегли трениран модел, не данни или запис. С това `git clone` + `cp .env.example .env` дава работещи AVM прогнози веднага, без да се иска credential от никого. `R2_MAINTAINER_*` остава **винаги** празно тук — реалните стойности стоят само в личния, gitignored `.env`.
+
+**Еднократна настройка в Cloudflare R2 dashboard (вече направена в този repo):**
+
+1. Bucket `bg-real-estate-backup`, отделен от `bg-real-estate-helper`.
+2. Token, scope **само** до `bg-real-estate-helper`, права **Object Read only** → `R2_MODELS_ACCESS_KEY_ID` / `R2_MODELS_SECRET_ACCESS_KEY` (тези стойности вече са в `.env.example`).
+3. Token, scope до **и двата** bucket-а, права **Object Read & Write** → `R2_MAINTAINER_ACCESS_KEY_ID` / `R2_MAINTAINER_SECRET_ACCESS_KEY` — само в личния `.env`, никога в git.
+
 ### Тренировъчен pipeline
 
 ```bash
-python -m scripts.train_avm_model              # всички 5 сегмента
-python -m scripts.train_avm_model --segment office   # само един сегмент
+python -m scripts.train_avm_model                     # всички 5 сегмента, само локално (бързо, без R2)
+python -m scripts.train_avm_model --segment office     # само един сегмент
+python -m scripts.train_avm_model --push-to-r2         # + качва в R2 и активира R2-backed запис
 ```
+
+Преобучаването е **само от командния ред, локално** — няма бутон в админ панела (беше премахнат нарочно, за да не се налага write-способният `R2_MAINTAINER_*` ключ да живее на deploy-ната машина). "Кой може да тренира" = "кой държи `R2_MAINTAINER_*` на своята машина."
+
+Без `--push-to-r2` моделът се записва само локално (`models/avm/`) и се регистрира в `avm_models` с локален път — приложението **не може** да го обслужи, докато не пуснете същата команда с `--push-to-r2`.
 
 Всеки сегмент с под `min_row_threshold` training-eligible обяви **не получава модел** — не се публикува low-confidence прогноза. Активирането на нов модел е атомарно per-сегмент (не засяга останалите сегменти).
 
-### Съхранение на моделите (DVC)
+### DVC (пълно локално огледало — опционално)
 
-`models/avm/` (~270 MB — trained `.joblib` артефакти за всички сегменти) **не се качва в git** — версионира се отделно с [DVC](https://dvc.org). Git пази само малкия pointer файл (`models/avm.dvc`, MD5 + размер); реалните тегла живеят в **Cloudflare R2** (S3-съвместим), bucket `bg-real-estate-helper`, под `dvc-store/`.
-
-```bash
-# след git clone — изтегля активните .joblib файлове от remote-а
-dvc pull
-
-# след ново трениране (scripts/train_avm_model.py записва в models/avm/)
-dvc add models/avm
-git add models/avm.dvc
-git commit -m "Retrain AVM models"
-dvc push
-```
-
-**Еднократна настройка на remote-а** (вече направена в този repo — за нова машина/clone credentials-ите се задават локално, не идват през git):
+`models/avm.dvc` остава git-tracked pointer за разработчици, които искат пълно локално огледало (debugging, офлайн работа) — **вече не е задължителна стъпка**, за да работи приложението.
 
 ```bash
-dvc remote add -d storage s3://bg-real-estate-helper/dvc-store
-dvc remote modify storage endpointurl https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
-# credentials НЕ отиват в git-tracked config — само в .dvc/config.local (gitignored):
-dvc remote modify --local storage access_key_id <access-key>
-dvc remote modify --local storage secret_access_key <secret-key>
+dvc pull    # по избор — пълно локално огледало на models/avm/
+dvc push    # само ако сте пипали models/avm/ извън train_avm_model.py --push-to-r2
 ```
 
-Стойностите за `.dvc/config.local` идват от `.env` (`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`) — вижте `.env.example`.
+`.dvc/config.local` (gitignored) сочи `R2_MAINTAINER_*` стойностите, не `R2_MODELS_*` — `dvc push` пише в bucket-а.
 
 ### Резервно копие на базата данни + MLflow (`scripts/backup_to_r2.py`)
 
-`pg_dump` на PostgreSQL базата и снимка на текущия `mlflow_tracking/mlflow.db` се качват в същия R2 bucket, но **без DVC** — MLflow-ската SQLite база се презаписва вътрешно при всеки run, така че content-addressable версиониране не носи полза (всяка промяна би съхранила пълно нов файл, не delta). Обикновен, timestamp-иран upload е достатъчен:
+`pg_dump` на PostgreSQL базата и снимка на текущия `mlflow_tracking/mlflow.db` се качват в **`bg-real-estate-backup`** (отделен от моделите bucket, вижте по-горе) с `R2_MAINTAINER_*` — MLflow-ската SQLite база се презаписва вътрешно при всеки run, така че content-addressable версиониране не носи полза (всяка промяна би съхранила пълно нов файл, не delta). Обикновен, timestamp-иран upload е достатъчен:
 
 ```bash
-python -m scripts.backup_to_r2                  # и двете
-python -m scripts.backup_to_r2 --skip-pgdump     # само mlflow.db
-python -m scripts.backup_to_r2 --skip-mlflow     # само pg_dump
+python -m scripts.backup_to_r2                             # и двете
+python -m scripts.backup_to_r2 --skip-pgdump                # само mlflow.db
+python -m scripts.backup_to_r2 --skip-mlflow                # само pg_dump
+python -m scripts.backup_to_r2 --prune-local-after-days 14  # + трие локални .dump по-стари от N дни
 ```
 
-Качва в `s3://bg-real-estate-helper/backups/pgdump/` и `.../backups/mlflow/`, като локалният `.dump` файл остава и в `backups/` (както досегашната ръчна практика); локалната mlflow snapshot копия се трие след успешен upload.
+Качва в `s3://bg-real-estate-backup/backups/pgdump/` и `.../backups/mlflow/`; локалният `.dump` файл остава в `backups/` по подразбиране (както досегашната ръчна практика — изтрийте ръчно или с `--prune-local-after-days`); локалните mlflow snapshot копия се трият автоматично след успешен upload.
 
 ---
 
@@ -358,6 +374,9 @@ docker-compose up db -d
 # 2. Конфигурация
 cp .env.example .env
 # Редактирайте DATABASE_URL и SECRET_KEY; по избор ADMIN_EMAIL
+# R2_MODELS_* идват вече попълнени (реален, публичен read-only ключ -- вижте
+# "R2 достъп и ключове" по-долу) -- AVM прогнозите работят веднага, без
+# допълнителна стъпка.
 
 # 3. Зависимости
 pip install -r requirements.txt
@@ -365,16 +384,13 @@ pip install -r requirements.txt
 # 4. Миграции
 alembic upgrade head
 
-# 5. Изтегляне на трениран AVM модели (DVC — вижте секцията по-долу)
-dvc pull
-
-# 6. Първи администраторски акаунт
+# 5. Първи администраторски акаунт
 python -m scripts.create_admin
 
-# 7. Еднократен импорт на исторически данни (опционален)
+# 6. Еднократен импорт на исторически данни (опционален)
 python -m scripts.import_historical_data
 
-# 8. Стартиране
+# 7. Стартиране
 uvicorn app.main:app --reload
 ```
 

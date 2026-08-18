@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: appraiser
+          POSTGRES_PASSWORD: appraiser
+          POSTGRES_DB: appraisal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg2://appraiser:appraiser@localhost:5432/appraisal
+      # CI-only value, never used outside this ephemeral run -- app/config.py
+      # requires a real (non-placeholder, >=32 char) SECRET_KEY to even import.
+      SECRET_KEY: ci-only-secret-key-1234567890-not-used-anywhere-else
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: pytest --cov=app --cov=utils --cov-report=term-missing

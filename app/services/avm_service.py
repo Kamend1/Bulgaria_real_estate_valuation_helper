@@ -5,6 +5,7 @@ value for an AppraisalReport's subject property.
 """
 from __future__ import annotations
 
+import io
 import logging
 import uuid
 
@@ -14,7 +15,9 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.models import AppraisalReport, AvmModel
+from app.services import r2_client
 from utils.ml import avm_features, text_features
 
 logger = logging.getLogger(__name__)
@@ -37,21 +40,37 @@ def get_active_model_meta(db: Session, segment: str) -> AvmModel | None:
     )
 
 
+def _load_joblib_from_r2(client, key: str):
+    """Fetches an object from R2 straight into memory and unpickles it --
+    no local file is ever written. `key` is one of avm_models' *_path
+    columns, which store R2 object keys (e.g.
+    "avm-models/hospitality/20260818_120000/model.joblib"), not local
+    filesystem paths."""
+    obj = client.get_object(Bucket=settings.r2_models_bucket_name, Key=key)
+    buf = io.BytesIO(obj["Body"].read())
+    return joblib.load(buf)
+
+
 def _load_pipelines(meta: AvmModel) -> dict:
+    """Fetches all pipeline artifacts for one AvmModel from R2, caching the
+    result in-process (_PIPELINE_CACHE) so each active model is only ever
+    fetched once per process lifetime, not once per prediction request."""
     cached = _PIPELINE_CACHE.get(meta.id)
     if cached is not None:
         return cached
+
+    client = r2_client.get_models_read_client()
     pipelines = {
-        "point": joblib.load(meta.model_path),
-        "q_low": joblib.load(meta.quantile_low_path),
-        "q_high": joblib.load(meta.quantile_high_path),
+        "point": _load_joblib_from_r2(client, meta.model_path),
+        "q_low": _load_joblib_from_r2(client, meta.quantile_low_path),
+        "q_high": _load_joblib_from_r2(client, meta.quantile_high_path),
     }
     if meta.companion_model_path:
-        pipelines["companion_point"] = joblib.load(meta.companion_model_path)
-        pipelines["companion_q_low"] = joblib.load(meta.companion_quantile_low_path)
-        pipelines["companion_q_high"] = joblib.load(meta.companion_quantile_high_path)
+        pipelines["companion_point"] = _load_joblib_from_r2(client, meta.companion_model_path)
+        pipelines["companion_q_low"] = _load_joblib_from_r2(client, meta.companion_quantile_low_path)
+        pipelines["companion_q_high"] = _load_joblib_from_r2(client, meta.companion_quantile_high_path)
     if meta.text_transformer_path:
-        pipelines["text_transformer"] = joblib.load(meta.text_transformer_path)
+        pipelines["text_transformer"] = _load_joblib_from_r2(client, meta.text_transformer_path)
     _PIPELINE_CACHE[meta.id] = pipelines
     return pipelines
 
@@ -93,7 +112,8 @@ def predict_sales_value(db: Session, report: AppraisalReport) -> dict:
     """
     Returns a dict always containing "ok". On success: ppsqm_point/low/high,
     total_point/low/high, model_trained_at, metrics, clamped. On failure:
-    "reason" is one of "missing_fields" | "unsupported_property_type" | "no_model".
+    "reason" is one of "missing_fields" | "unsupported_property_type" |
+    "no_model" | "model_fetch_failed" | "prediction_error".
     """
     missing = avm_features.missing_subject_fields(report)
     if missing:
@@ -115,6 +135,15 @@ def predict_sales_value(db: Session, report: AppraisalReport) -> dict:
 
     try:
         pipelines = _load_pipelines(meta)
+    except Exception:
+        # Separate from the prediction try-block below on purpose -- an R2
+        # outage / bad credentials / missing object should surface as a
+        # distinct, explainable degradation ("model temporarily
+        # unavailable"), not get lumped in with a genuine inference bug.
+        logger.exception("AVM model fetch from R2 failed for report %s, segment %s", report.id, segment)
+        return {"ok": False, "reason": "model_fetch_failed", "segment": segment}
+
+    try:
         if meta.text_transformer_path:
             text_row = text_features.transform_tfidf_svd(
                 pd.Series([report.subject_description or ""]), pipelines["text_transformer"]

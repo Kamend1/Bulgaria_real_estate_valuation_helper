@@ -13,6 +13,11 @@ Usage:
     python -m scripts.backup_to_r2
     python -m scripts.backup_to_r2 --skip-pgdump     # only upload mlflow.db
     python -m scripts.backup_to_r2 --skip-mlflow     # only pg_dump
+    python -m scripts.backup_to_r2 --prune-local-after-days 14   # also delete
+        # local backups/*.dump older than N days (uploaded copies in R2 are
+        # untouched -- this only bounds local disk growth, see H1 in the
+        # audit; mlflow_*.db snapshots are already deleted locally right
+        # after upload, so there's nothing to prune for those)
 
 Requires R2_* settings in .env (see .env.example) — role/bucket details are
 never read from anywhere else, so a missing .env entry fails loudly instead
@@ -24,16 +29,17 @@ import argparse
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, ".")
 
-import boto3
 from botocore.exceptions import ClientError
 
 from app.config import settings
+from app.services import r2_client
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BACKUPS_DIR = PROJECT_ROOT / "backups"
@@ -41,29 +47,12 @@ MLFLOW_DB_PATH = PROJECT_ROOT / "mlflow_tracking" / "mlflow.db"
 
 
 def _require_r2_config() -> None:
-    missing = [
-        name for name, value in [
-            ("R2_ENDPOINT_URL", settings.r2_endpoint_url),
-            ("R2_ACCESS_KEY_ID", settings.r2_access_key_id),
-            ("R2_SECRET_ACCESS_KEY", settings.r2_secret_access_key),
-            ("R2_BUCKET_NAME", settings.r2_bucket_name),
-        ] if not value
-    ]
-    if missing:
-        raise SystemExit(
-            f"Missing R2 config in .env: {', '.join(missing)}. "
-            "See .env.example for the expected keys."
-        )
-
-
-def _r2_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=settings.r2_endpoint_url,
-        aws_access_key_id=settings.r2_access_key_id,
-        aws_secret_access_key=settings.r2_secret_access_key,
-        region_name="auto",  # R2 ignores region but boto3 requires a value
-    )
+    try:
+        r2_client.require_maintainer_config()
+    except RuntimeError as exc:
+        raise SystemExit(f"{exc}. See .env.example for the expected keys.") from exc
+    if not settings.r2_backups_bucket_name:
+        raise SystemExit("Missing R2 config in .env: R2_BACKUPS_BUCKET_NAME. See .env.example.")
 
 
 def _pg_dump(timestamp: str) -> Path:
@@ -100,22 +89,36 @@ def _snapshot_mlflow_db(timestamp: str) -> Path:
 
 
 def _upload(client, local_path: Path, key: str) -> None:
-    print(f"Uploading {local_path.name} -> s3://{settings.r2_bucket_name}/{key} ...")
+    print(f"Uploading {local_path.name} -> s3://{settings.r2_backups_bucket_name}/{key} ...")
     try:
-        client.upload_file(str(local_path), settings.r2_bucket_name, key)
+        client.upload_file(str(local_path), settings.r2_backups_bucket_name, key)
     except ClientError as exc:
         raise RuntimeError(f"Upload failed for {local_path.name}: {exc}") from exc
     print("  done.")
+
+
+def _prune_local_dumps(older_than_days: int) -> None:
+    """Deletes local backups/*.dump files older than N days. The uploaded
+    copy in R2 is the durable one -- this only bounds local disk growth."""
+    cutoff = time.time() - older_than_days * 86400
+    for dump_path in sorted(BACKUPS_DIR.glob("appraisal_*.dump")):
+        if dump_path.stat().st_mtime < cutoff:
+            print(f"Pruning local backup older than {older_than_days}d: {dump_path.name}")
+            dump_path.unlink()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--skip-pgdump", action="store_true")
     parser.add_argument("--skip-mlflow", action="store_true")
+    parser.add_argument(
+        "--prune-local-after-days", type=int, default=None, metavar="N",
+        help="Delete local backups/*.dump older than N days after a successful upload.",
+    )
     args = parser.parse_args()
 
     _require_r2_config()
-    client = _r2_client()
+    client = r2_client.get_maintainer_client()
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
@@ -127,6 +130,9 @@ def main() -> int:
         mlflow_snapshot = _snapshot_mlflow_db(timestamp)
         _upload(client, mlflow_snapshot, f"backups/mlflow/{mlflow_snapshot.name}")
         mlflow_snapshot.unlink()  # local copy was only needed to hand off to upload_file
+
+    if args.prune_local_after_days is not None:
+        _prune_local_dumps(args.prune_local_after_days)
 
     print("Backup complete.")
     return 0

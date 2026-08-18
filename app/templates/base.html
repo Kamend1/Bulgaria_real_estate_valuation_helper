@@ -6,6 +6,7 @@
   <title>{% block title %}Дигитален асистент на имотния оценител{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+  <meta name="csrf-token" content="{{ csrf_token(request) }}">
   {% block extra_css %}{% endblock %}
   <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -13,11 +14,29 @@
       const nav   = document.querySelector('.navbar');
       const h = (strip ? strip.offsetHeight : 0) + (nav ? nav.offsetHeight : 0);
       document.documentElement.style.setProperty('--navbar-h', h + 'px');
+
+      // CSRF: every classic (non-htmx) <form method="post"> needs the token
+      // as a real field, since there's no JS involved in a native browser
+      // form submission to attach a header. htmx-triggered requests get the
+      // token a different way — see the hx-headers attribute on <body>
+      // below, which htmx applies to every request it fires regardless of
+      // when the form entered the DOM (covers content swapped in later too,
+      // which a load-time-only script here would miss).
+      var csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+      document.querySelectorAll('form').forEach(function (form) {
+        if (!form.querySelector('input[name="csrf_token"]')) {
+          var input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'csrf_token';
+          input.value = csrfToken;
+          form.appendChild(input);
+        }
+      });
     });
   </script>
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}" hx-headers='{"X-CSRF-Token": "{{ csrf_token(request) }}"}'>
 
   <div class="brand-strip">
     <div class="brand-strip-left">

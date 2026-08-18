@@ -9,13 +9,21 @@ instead of a parquet snapshot, and repeats it independently for each of the
 5 asset-class segments defined in utils/ml/avm_features.py.
 
 Usage (from project root):
-    python -m scripts.train_avm_model                  # train all 5 segments
+    python -m scripts.train_avm_model                  # train all 5 segments, local-only
     python -m scripts.train_avm_model --segment office  # retrain one segment
     python -m scripts.train_avm_model --min-rows 200    # override the guard
+    python -m scripts.train_avm_model --push-to-r2      # also upload to R2 and
+                                                         # activate the R2-backed row
 
 A segment whose training_eligible row count falls below --min-rows is
 skipped entirely (no model written, no avm_models row) rather than being
 trained and silently activated with too little data.
+
+Without --push-to-r2, models are trained and saved locally only (fast
+iteration, no R2 credentials needed) but the app CANNOT serve them --
+app/services/avm_service.py fetches exclusively from R2 (see Phase 5 of the
+audit plan). Requires R2_MAINTAINER_* in .env (local-machine only, never
+deployed) — see .env.example.
 """
 import argparse
 import sys
@@ -42,6 +50,7 @@ from app.config import settings
 from app.db.base import engine
 from app.db.models import AvmModel
 from app.db.session import db_session
+from app.services import r2_client
 from utils.ml.avm_features import CATEGORICAL_COLS, NUMERIC_COLS, SEGMENT_PROPERTY_TYPES, prep_for_catboost
 from utils.ml.text_features import fit_tfidf_svd, text_feature_columns, transform_tfidf_svd
 
@@ -300,7 +309,24 @@ def _predict_raw_catboost(model: CatBoostRegressor, X: pd.DataFrame, use_log_tar
     return np.clip(pred, 1, None)
 
 
-def train_segment(segment: str, min_rows: int) -> None:
+def _r2_key(segment: str, timestamp: str, filename: str) -> str:
+    """Predictable key scheme, independent of DVC's content-addressed
+    layout, so avm_service.py can fetch by a simple, human-readable path."""
+    return f"avm-models/{segment}/{timestamp}/{filename}"
+
+
+def _upload_artifacts_to_r2(local_paths: dict[str, Path], segment: str, timestamp: str) -> dict[str, str]:
+    client = r2_client.get_maintainer_client()
+    keys: dict[str, str] = {}
+    for role, local_path in local_paths.items():
+        key = _r2_key(segment, timestamp, local_path.name)
+        print(f"  uploading {local_path.name} -> s3://{settings.r2_models_bucket_name}/{key} ...")
+        client.upload_file(str(local_path), settings.r2_models_bucket_name, key)
+        keys[role] = key
+    return keys
+
+
+def train_segment(segment: str, min_rows: int, push_to_r2: bool) -> None:
     print(f"\n{'='*60}\nSegment: {segment}")
     slugs = SEGMENT_PROPERTY_TYPES[segment]
 
@@ -430,6 +456,23 @@ def train_segment(segment: str, min_rows: int) -> None:
         joblib.dump(text_transformer, text_transformer_path)
     print(f"  saved to {model_dir}")
 
+    local_paths = {"model": model_path, "q_low": q_low_path, "q_high": q_high_path}
+    if cb_model_path:
+        local_paths.update({
+            "companion_model": cb_model_path,
+            "companion_q_low": cb_q_low_path,
+            "companion_q_high": cb_q_high_path,
+        })
+    if text_transformer_path:
+        local_paths["text_transformer"] = text_transformer_path
+
+    if push_to_r2:
+        stored = _upload_artifacts_to_r2(local_paths, segment, timestamp)
+        print("  pushed to R2 -- app can now serve this model.")
+    else:
+        stored = {role: str(path) for role, path in local_paths.items()}
+        print("  NOT pushed to R2 -- app cannot serve this model until you rerun with --push-to-r2.")
+
     with db_session() as session:
         previously_active = (
             session.query(AvmModel)
@@ -448,20 +491,23 @@ def train_segment(segment: str, min_rows: int) -> None:
             metrics={"validation": val_metrics, "test": test_metrics},
             training_row_count=row_count,
             min_row_threshold=min_rows,
-            model_path=str(model_path),
-            quantile_low_path=str(q_low_path),
-            quantile_high_path=str(q_high_path),
+            model_path=stored["model"],
+            quantile_low_path=stored["q_low"],
+            quantile_high_path=stored["q_high"],
             is_active=True,
             target_transform="log1p" if use_log_target else "raw",
             companion_algorithm="catboost" if cb_point_model is not None else None,
-            companion_model_path=str(cb_model_path) if cb_model_path else None,
-            companion_quantile_low_path=str(cb_q_low_path) if cb_q_low_path else None,
-            companion_quantile_high_path=str(cb_q_high_path) if cb_q_high_path else None,
+            companion_model_path=stored.get("companion_model"),
+            companion_quantile_low_path=stored.get("companion_q_low"),
+            companion_quantile_high_path=stored.get("companion_q_high"),
             blend_weight=blend_weight,
-            text_transformer_path=str(text_transformer_path) if text_transformer_path else None,
+            text_transformer_path=stored.get("text_transformer"),
         ))
 
-    print(f"  activated new {segment} model.")
+    if push_to_r2:
+        print(f"  activated new {segment} model (R2-backed).")
+    else:
+        print(f"  activated new {segment} model (LOCAL PATH ONLY -- app cannot serve it, see warning above).")
 
 
 def main() -> None:
@@ -474,6 +520,12 @@ def main() -> None:
         "--min-rows", type=int, default=300,
         help="Minimum training_eligible rows required to train+activate a segment (default: 300)",
     )
+    parser.add_argument(
+        "--push-to-r2", action="store_true",
+        help="Upload trained artifacts to R2 (requires R2_MAINTAINER_* in .env) and register "
+             "R2 keys in avm_models instead of local paths. Without this flag, the model is "
+             "trained and saved locally only and the app cannot serve it.",
+    )
     args = parser.parse_args()
 
     segments = [args.segment] if args.segment else list(SEGMENT_PROPERTY_TYPES.keys())
@@ -481,9 +533,14 @@ def main() -> None:
     print("AVM Training")
     print(f"Database: {settings.database_url.split('@')[-1]}")
     print(f"Segments: {', '.join(segments)}")
+    if args.push_to_r2:
+        r2_client.require_maintainer_config()
+        print(f"R2 push: enabled -> s3://{settings.r2_models_bucket_name}/avm-models/")
+    else:
+        print("R2 push: disabled (local-only training run)")
 
     for segment in segments:
-        train_segment(segment, min_rows=args.min_rows)
+        train_segment(segment, min_rows=args.min_rows, push_to_r2=args.push_to_r2)
 
     print(f"\n{'='*60}\nDone.")
 

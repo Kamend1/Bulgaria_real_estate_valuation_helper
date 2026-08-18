@@ -11,9 +11,15 @@ alembic==1.18.4
 
 # ── Config ────────────────────────────────────────────────────────────────────
 pydantic-settings==2.14.1
+# Undeclared transitive need of pydantic-settings' .env-file loading — found
+# missing from a fresh environment during this audit; without it,
+# `from app.config import settings` (i.e. the whole app) fails at import.
+python-dotenv==1.2.3
 
 # ── Authentication ────────────────────────────────────────────────────────────
 passlib[bcrypt]==1.7.4
+slowapi==0.1.10
+email-validator==2.3.0   # pydantic's EmailStr needs this at runtime, not just for typing
 
 # ── Report generation ─────────────────────────────────────────────────────────
 python-docx==1.1.2
@@ -46,5 +52,9 @@ pyproj==3.7.2
 dvc==3.67.1
 dvc-s3==3.3.0
 
-# ── R2 backups (scripts/backup_to_r2.py — pg_dump + mlflow.db -> Cloudflare R2) ─
+# ── Cloudflare R2 (S3-compatible) ────────────────────────────────────────────
+# Genuine app-runtime dependency as of Phase 5 (AVM-from-R2): imported by
+# app/services/r2_client.py, used by avm_service.py to fetch AVM models at
+# inference time — not just scripts/backup_to_r2.py/train_avm_model.py
+# tooling anymore. See H2 in the audit for why this moved back here.
 boto3==1.43.0

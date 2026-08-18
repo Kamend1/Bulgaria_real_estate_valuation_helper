@@ -1,0 +1,38 @@
+# Secrets — never bake these into an image layer. Local dev gets them back
+# via docker-compose's bind mount (.:/workspace) + env_file; a real deploy
+# must inject them at runtime (env vars / secret manager), not at build time.
+.env
+.env.local
+.env.*.local
+
+# Version control
+.git
+.gitignore
+
+# Heavy/generated data — not needed to build the image; local dev sees the
+# real ones through the bind mount anyway.
+data/
+notebooks/data/
+models/
+mlflow_tracking/
+backups/
+outputs/
+.dvc/cache
+.dvc/tmp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+.virtual_documents/

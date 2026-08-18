@@ -77,7 +77,18 @@ def search_listings(
     page: int = 1,
     per_page: int = RESULTS_PER_PAGE,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Returns (rows, total_count). Each row has price_trend and pct_change."""
+    """Returns (rows, total_count). Each row has price_trend and pct_change.
+
+    SECURITY INVARIANT: `conditions` below gets joined and f-string'd
+    directly into the SQL text (see `where_sql` / `main_sql`). That's only
+    safe because every entry is a *literal, hardcoded* fragment
+    (`"l.x = :name"`) — the actual user-supplied values always travel
+    through `params` as bound placeholders, never through this list. If
+    you add a new filter, follow that same split; do not f-string a
+    filter *value* into `conditions` directly, even for something that
+    looks harmless like a sort column name (see `_SORT_SQL`'s dict-lookup
+    pattern for how to keep that safe too).
+    """
     conditions = [
         "l.total_price IS NOT NULL",
         "l.price_per_sqm_model IS NOT NULL",

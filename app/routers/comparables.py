@@ -4,6 +4,7 @@ from datetime import date
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -102,8 +103,12 @@ async def comparables_page(
     report = _active_report(request, db, user)
     pool_sale = get_pool_with_stats(db, "sale", report.id)
     pool_rent = get_pool_with_stats(db, "rent", report.id)
-    avm = avm_service.predict_sales_value(db, report)
-    cadastre = gis_service.get_cadastre_panel_data(report)
+    # Both of these make blocking network calls (AGKK/isofmap.bg/NAG Sofia,
+    # cold-start joblib.load) — offloaded to a worker thread so a slow
+    # external response doesn't stall the single asyncio event loop for
+    # every other concurrent request.
+    avm = await run_in_threadpool(avm_service.predict_sales_value, db, report)
+    cadastre = await run_in_threadpool(gis_service.get_cadastre_panel_data, report)
     property_type_groups = [
         (SEGMENT_DISPLAY_NAMES[segment], [(slug, PROPERTY_TYPE_DISPLAY.get(slug, slug)) for slug in slugs])
         for segment, slugs in SEGMENT_PROPERTY_TYPES.items()

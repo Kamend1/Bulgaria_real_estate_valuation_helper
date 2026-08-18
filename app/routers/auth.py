@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import User, UserConsent
 from app.db.session import get_db
+from app.rate_limit import limiter
 from app.services import auth_service
 from app.services.auth_service import PRIVACY_VERSION, TERMS_VERSION
 from app.templating import templates
@@ -32,11 +34,12 @@ async def login_page(request: Request):
 
 
 @router.post("/login", response_class=HTMLResponse)
+@limiter.limit("5/minute")
 async def login_post(
     request: Request,
     db: Session = Depends(get_db),
     login: str = Form(...),
-    password: str = Form(...),
+    password: str = Form(..., max_length=128),
     next: str = Form(default="/"),
 ):
     user = auth_service.authenticate(db, login, password)
@@ -74,14 +77,15 @@ async def register_page(request: Request):
 
 
 @router.post("/register", response_class=HTMLResponse)
+@limiter.limit("5/minute")
 async def register_post(
     request: Request,
     db: Session = Depends(get_db),
-    email: str = Form(...),
-    username: str = Form(...),
-    password: str = Form(...),
-    password2: str = Form(...),
-    full_name: str = Form(default=""),
+    email: EmailStr = Form(..., max_length=255),
+    username: str = Form(..., max_length=100),
+    password: str = Form(..., max_length=128),
+    password2: str = Form(..., max_length=128),
+    full_name: str = Form(default="", max_length=255),
     accept_privacy: str = Form(default=""),
     accept_terms: str = Form(default=""),
 ):
@@ -161,9 +165,9 @@ async def profile_page(request: Request, db: Session = Depends(get_db)):
 async def profile_update(
     request: Request,
     db: Session = Depends(get_db),
-    full_name: str = Form(default=""),
-    email: str = Form(...),
-    username: str = Form(...),
+    full_name: str = Form(default="", max_length=255),
+    email: EmailStr = Form(..., max_length=255),
+    username: str = Form(..., max_length=100),
 ):
     user = request.state.user
     if not user:
@@ -197,9 +201,9 @@ async def profile_update(
 async def change_password(
     request: Request,
     db: Session = Depends(get_db),
-    current_password: str = Form(...),
-    new_password: str = Form(...),
-    new_password2: str = Form(...),
+    current_password: str = Form(..., max_length=128),
+    new_password: str = Form(..., max_length=128),
+    new_password2: str = Form(..., max_length=128),
 ):
     user = request.state.user
     if not user:

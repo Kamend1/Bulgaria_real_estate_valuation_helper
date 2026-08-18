@@ -1,10 +1,9 @@
-import subprocess
-import sys
-import threading
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
 from app.db.models import AvmModel, User, UserConsent
@@ -13,20 +12,9 @@ from app.services import auth_service
 from app.templating import templates
 from utils.ml.avm_features import SEGMENT_DISPLAY_NAMES, SEGMENT_PROPERTY_TYPES
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-_avm_training_active = False
-
-
-def _run_avm_training(segment: str | None) -> None:
-    global _avm_training_active
-    try:
-        cmd = [sys.executable, "-m", "scripts.train_avm_model"]
-        if segment:
-            cmd += ["--segment", segment]
-        subprocess.run(cmd, check=False)
-    finally:
-        _avm_training_active = False
 
 
 def _require_admin(request: Request):
@@ -139,9 +127,9 @@ async def admin_update_user(
     request: Request,
     user_id: int,
     db: Session = Depends(get_db),
-    email: str = Form(...),
-    username: str = Form(...),
-    full_name: str = Form(default=""),
+    email: EmailStr = Form(..., max_length=255),
+    username: str = Form(..., max_length=100),
+    full_name: str = Form(default="", max_length=255),
 ):
     redirect = _require_admin(request)
     if redirect:
@@ -181,8 +169,8 @@ async def admin_reset_password(
     request: Request,
     user_id: int,
     db: Session = Depends(get_db),
-    new_password: str = Form(...),
-    new_password2: str = Form(...),
+    new_password: str = Form(..., max_length=128),
+    new_password2: str = Form(..., max_length=128),
 ):
     redirect = _require_admin(request)
     if redirect:
@@ -225,11 +213,11 @@ async def admin_new_user_form(request: Request):
 async def admin_create_user(
     request: Request,
     db: Session = Depends(get_db),
-    email: str = Form(...),
-    username: str = Form(...),
-    full_name: str = Form(default=""),
-    password: str = Form(...),
-    password2: str = Form(...),
+    email: EmailStr = Form(..., max_length=255),
+    username: str = Form(..., max_length=100),
+    full_name: str = Form(default="", max_length=255),
+    password: str = Form(..., max_length=128),
+    password2: str = Form(..., max_length=128),
     role: str = Form(default="user"),
 ):
     redirect = _require_admin(request)
@@ -301,24 +289,5 @@ async def admin_avm(request: Request, db: Session = Depends(get_db)):
         {
             "by_segment": by_segment,
             "segment_display_names": SEGMENT_DISPLAY_NAMES,
-            "training_active": _avm_training_active,
-            "started": request.query_params.get("started"),
         },
     )
-
-
-@router.post("/avm/retrain")
-async def admin_avm_retrain(request: Request, segment: str = Form("")):
-    redirect = _require_admin(request)
-    if redirect:
-        return redirect
-
-    global _avm_training_active
-    if not _avm_training_active:
-        _avm_training_active = True
-        threading.Thread(
-            target=_run_avm_training,
-            args=(segment or None,),
-            daemon=True,
-        ).start()
-    return RedirectResponse(url="/admin/avm?started=1", status_code=302)
