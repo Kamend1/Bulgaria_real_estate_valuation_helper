@@ -20,6 +20,12 @@ python-dotenv==1.2.3
 passlib[bcrypt]==1.7.4
 slowapi==0.1.10
 email-validator==2.3.0   # pydantic's EmailStr needs this at runtime, not just for typing
+# Starlette's SessionMiddleware (app/main.py) needs this to sign the session
+# cookie -- starlette treats it as optional and doesn't declare it itself, so
+# it must be pinned directly. Was only ever present locally as someone else's
+# transitive dependency; missing on a clean install (caught by CI, see
+# GitHub issue #1).
+itsdangerous==2.2.0
 
 # ── Report generation ─────────────────────────────────────────────────────────
 python-docx==1.1.2
