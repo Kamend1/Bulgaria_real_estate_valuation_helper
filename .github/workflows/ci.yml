@@ -11,7 +11,13 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector/pgvector:pg16 is postgres:16's own Debian base with the
+        # `vector` extension pre-built in -- migration 0019 (Phase 7) runs
+        # CREATE EXTENSION IF NOT EXISTS vector, which fails on plain
+        # postgres:16 (no extension control file). Same image swap already
+        # done for local dev (see plan doc's Phase 7 "pgvector target"
+        # note) -- CI's service container needed the same fix.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: appraiser
           POSTGRES_PASSWORD: appraiser
