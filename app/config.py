@@ -59,6 +59,20 @@ class Settings(BaseSettings):
     r2_maintainer_secret_access_key: str = ""
     r2_backups_bucket_name: str = ""
 
+    # AI-assisted valuation (Phase 7 — app/services/llm/). Real secret, .env
+    # only — unlike R2_MODELS_* above, this is the owner's own billed API
+    # key, not a scoped read-only credential, so it never gets a real value
+    # in .env.example.
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    google_api_key: str = ""
+    # Swappable to "openai" | "anthropic" | "google_genai" | (later) "ollama"
+    # — same factory function in app/services/llm/providers.py, just a new
+    # branch + the matching small partner package + its own *_api_key
+    # setting for anything beyond these three.
+    llm_default_provider: str = "openai"
+    llm_default_embedding_provider: str = "openai"
+
     @field_validator("secret_key")
     @classmethod
     def _secret_key_must_be_real(cls, v: str) -> str:

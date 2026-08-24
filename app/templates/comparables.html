@@ -221,6 +221,23 @@
 
 {% include "comparables/_avm_panel.html" %}
 
+<section class="income-panel card" id="ai-suggestions-panel">
+  <h2>AI-предложение за оценка</h2>
+  <details>
+    <summary class="hint" style="cursor:pointer">
+      Покажи AI-предложени сравними (семантично търсене — прави реална заявка към AI доставчика)
+    </summary>
+    <div id="ai-suggestions-content"
+         hx-get="/comparables/ai-suggestions"
+         hx-trigger="toggle once from:closest details"
+         hx-target="this"
+         hx-swap="innerHTML"
+         style="margin-top:0.5rem">
+      <p class="hint">Зареждане…</p>
+    </div>
+  </details>
+</section>
+
 {% include "comparables/_cadastre_panel.html" %}
 
 {% include "comparables/_income_analysis.html" %}

@@ -1,0 +1,113 @@
+{# Final rendered narrative (Phase 7, Tier 3) -- server-rendered (Jinja
+   auto-escapes) rather than client-side JSON templating, to avoid any XSS
+   risk from LLM-generated text ending up in innerHTML. #}
+{% set r = result %}
+<div class="badge badge-warn" style="display:inline-block;margin:0.5rem 0">
+  Чернова — изисква преглед
+</div>
+
+<h4 style="margin-bottom:0.25rem">Обосновка на избора на сравними</h4>
+<p>{{ r.comparable_selection_rationale }}</p>
+
+<h4 style="margin-bottom:0.25rem">Коментар по сравними</h4>
+<div style="white-space:pre-line">{{ r.comparable_commentary }}</div>
+
+<h4 style="margin-bottom:0.25rem">Предложен диапазон стойност</h4>
+{% if r.suggested_value_range_low and r.suggested_value_range_high %}
+<p><strong>{{ r.suggested_value_range_low | int | format_number }} – {{ r.suggested_value_range_high | int | format_number }} EUR</strong>
+  <span class="hint">(изчислен от статистиката на сравнимите, не от AI текста)</span></p>
+{% else %}
+<p class="hint">Не може да се изчисли диапазон (липсва площ на обекта или ценова статистика на сравнимите).</p>
+{% endif %}
+<p>{{ r.value_reasoning }}</p>
+
+<h4 style="margin-bottom:0.25rem">Ограничения</h4>
+<p>{{ r.caveats }}</p>
+
+<p class="hint" style="margin-top:0.5rem">
+  {{ r.input_tokens }} вх. + {{ r.output_tokens }} изх. токена
+  {% if r.estimated_cost_usd is not none %}
+  &nbsp;·&nbsp; ~${{ '%.4f' % r.estimated_cost_usd }}
+  {% endif %}
+  &nbsp;·&nbsp; {{ r.model }}
+</p>
+
+<button type="button" class="btn-primary btn-sm" onclick="insertAiNarrativeIntoReport()">
+  Вмъкни в обосновката на съпоставимата зона
+</button>
+
+{% if r.income %}
+<hr style="margin:1rem 0;border-color:var(--border)">
+<h3 style="margin-bottom:0.5rem">Доходен подход</h3>
+
+{% if not r.income.available %}
+<p class="hint">{{ r.income.reason }}</p>
+
+{% else %}
+{% set v = r.income.valuation %}
+<h4 style="margin-bottom:0.25rem">Обосновка на избора на наемни сравними</h4>
+<p>{{ r.income.rationale }}</p>
+
+<h4 style="margin-bottom:0.25rem">Коментар по наемни сравними</h4>
+<div style="white-space:pre-line">{{ r.income.commentary }}</div>
+
+<h4 style="margin-bottom:0.25rem">Изчислена доходна стойност</h4>
+<p class="hint" style="margin-bottom:0.4rem">
+  Наем {{ v.assumptions_used.rent_per_sqm_month }} EUR/кв.м/мес &nbsp;·&nbsp;
+  Разходи {{ v.assumptions_used.expenses_pct }}% &nbsp;·&nbsp;
+  Незаетост {{ v.assumptions_used.vacancy_pct }}% &nbsp;·&nbsp;
+  Cap Rate {{ v.assumptions_used.cap_rate_pct }}% &nbsp;·&nbsp;
+  Ръст {{ v.assumptions_used.growth_pct }}%/год &nbsp;·&nbsp;
+  Хоризонт {{ v.assumptions_used.period_years }} год. &nbsp;·&nbsp;
+  Терм. Cap Rate {{ v.assumptions_used.terminal_cap_rate_pct }}%
+  <span style="display:block;margin-top:0.15rem">(изчислено от инструмента, не от AI текста — вижте разсъждението по-долу за избора на допускания)</span>
+</p>
+<div class="value-block">
+  <div class="value-card">
+    <div class="value-method">Директна капитализация</div>
+    <div class="value-formula">NOI / Cap Rate</div>
+    <div class="value-result">{{ v.direct_value_per_sqm | int | format_number }} EUR/кв.м</div>
+  </div>
+  <div class="value-card">
+    <div class="value-method">DCF ({{ v.assumptions_used.period_years }} год.)</div>
+    <div class="value-formula">ΣPV(NOI) + PV(Изход)</div>
+    <div class="value-result">{{ v.dcf_value_per_sqm | int | format_number }} EUR/кв.м</div>
+  </div>
+</div>
+<p class="hint">NOI/кв.м/год: {{ v.noi_per_sqm_year | format_number }}
+  {% if v.gross_yield_pct is not none %}&nbsp;·&nbsp; Брутна доходност: {{ v.gross_yield_pct }}%{% endif %}
+  {% if v.net_yield_pct is not none %}&nbsp;·&nbsp; Нетна доходност: {{ v.net_yield_pct }}%{% endif %}
+  {% if v.gross_yield_pct is none %}&nbsp;·&nbsp; <span class="hint">(доходност недостъпна — AI-ят не е подал продажна цена/кв.м)</span>{% endif %}</p>
+
+<h4 style="margin-bottom:0.25rem">Разсъждение</h4>
+<p>{{ r.income.reasoning }}</p>
+
+<h4 style="margin-bottom:0.25rem">Ограничения (доходен подход)</h4>
+<p>{{ r.income.caveats }}</p>
+
+<button type="button" class="btn-primary btn-sm" onclick="insertIncomeNarrativeIntoReport()">
+  Вмъкни в обосновката на доходния подход
+</button>
+{% endif %}
+{% endif %}
+
+<script>
+function insertAiNarrativeIntoReport() {
+  var ta = document.querySelector('textarea[name="submarket_rationale"]');
+  if (!ta) return;
+  ta.value = {{ combined_text | tojson }};
+  var details = ta.closest('details');
+  if (details) details.open = true;
+  ta.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+{% if combined_income_text %}
+function insertIncomeNarrativeIntoReport() {
+  var ta = document.querySelector('textarea[name="income_market_rationale"]');
+  if (!ta) return;
+  ta.value = {{ combined_income_text | tojson }};
+  var details = ta.closest('details');
+  if (details) details.open = true;
+  ta.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+{% endif %}
+</script>

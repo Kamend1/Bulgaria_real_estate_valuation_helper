@@ -1,3 +1,7 @@
+import asyncio
+import json
+import logging
+import threading
 import uuid
 from datetime import date
 
@@ -8,11 +12,19 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.models import AppraisalReport, ComparablePool, User
-from app.db.session import get_db
+from app.db.session import db_session, get_db
 from app.dependencies import require_auth as get_current_user
+from app.rate_limit import limiter
 from app.templating import templates
 from app.services import avm_service, gis_service
+from app.services.llm import generation_store
+from app.services.llm.providers import get_default_model, list_available_models, list_configured_providers
+from app.services.llm.retriever import retrieve_comparables
+from app.services.llm.valuation_chain import GenerationProgress, generate_valuation_backbone
+
+logger = logging.getLogger(__name__)
 from app.services.comparable_service import (
     ADJUSTMENT_FACTOR_LABELS,
     MAX_PINNED,
@@ -32,6 +44,7 @@ from app.services.comparable_service import (
     toggle_pin,
     update_conclusion,
     update_income_approach,
+    update_income_market_rationale,
     update_legal_description,
     update_pool_adjustment,
     update_residual_approach,
@@ -136,6 +149,163 @@ async def comparables_page(
             "MAX_PINNED": MAX_PINNED,
             "adjustment_factor_labels": ADJUSTMENT_FACTOR_LABELS,
         },
+    )
+
+
+# ── AI-assisted valuation (Phase 7, Tier 2 — retrieval only) ────────────────────
+
+@router.get("/ai-suggestions", response_class=HTMLResponse)
+@limiter.limit("20/hour")
+async def ai_suggestions_panel(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Lazy-loaded (only fires when the panel is opened, not on every page
+    view) since retrieve_comparables makes a real, billed embeddings API
+    call. Rate-limited for the same reason. Read-only for now (Tier 2) --
+    no add-to-pool action yet, this is purely for sanity-checking retrieval
+    quality; Tier 3 adds the generation step on top of this."""
+    report = _active_report(request, db, user)
+    error = None
+    suggestions: list[dict] = []
+    try:
+        # Real network call (embeddings API) -- offloaded so it can't stall
+        # the event loop for other concurrent requests, same as the AVM/
+        # cadastre calls in comparables_page above.
+        suggestions = await run_in_threadpool(retrieve_comparables, db, report, 6)
+    except RuntimeError as e:
+        error = str(e)  # e.g. "OPENAI_API_KEY is not set -- add it to .env"
+    # {provider_key: [(model_id, tier_label), ...]} -- only for providers
+    # that are actually configured, so the combined dropdown never offers a
+    # provider:model combo that would just fail with "API_KEY is not set".
+    models_by_provider = {key: list_available_models(key) for key, _ in list_configured_providers()}
+    return templates.TemplateResponse(
+        request,
+        "comparables/_ai_suggestions_panel.html",
+        {
+            "suggestions": suggestions, "error": error, "report": report,
+            "configured_providers": list_configured_providers(),
+            "default_provider": settings.llm_default_provider,
+            "default_model": get_default_model(settings.llm_default_provider),
+            "models_by_provider": models_by_provider,
+        },
+    )
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str, ensure_ascii=False)}\n\n"
+
+
+def _run_generation(
+    run_id: str, report_id: str, provider: str | None, model: str | None, include_income: bool,
+) -> None:
+    """Background-thread target (daemon thread, NOT a FastAPI BackgroundTask
+    -- see CLAUDE.md's note on why: those are bound to the request and can
+    time out). Uses its own db_session() since a SQLAlchemy Session isn't
+    thread-safe to share with the request that spawned this thread."""
+    def on_progress(p: GenerationProgress) -> None:
+        generation_store.update(run_id, p)
+
+    try:
+        with db_session() as db:
+            report = db.get(AppraisalReport, uuid.UUID(report_id))
+            if report is None:
+                generation_store.update(run_id, GenerationProgress(status="error", error="Докладът не е намерен."))
+                return
+            generate_valuation_backbone(
+                db, report, on_progress=on_progress, provider=provider, model=model,
+                include_income=include_income,
+            )
+    except Exception:
+        logger.exception("AI valuation generation failed (run_id=%s)", run_id)
+        generation_store.update(run_id, GenerationProgress(status="error", error="Неочаквана грешка при генерирането. Опитайте отново."))
+
+
+@router.post("/ai-generate", response_class=HTMLResponse)
+@limiter.limit("10/hour")
+async def ai_generate_start(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    provider_model: str = Form(""),
+    include_income: bool = Form(False),
+):
+    # provider_model encodes "provider:model" from a single combined
+    # dropdown (see _ai_suggestions_panel.html) -- simpler than two selects
+    # with JS show/hide per provider, and degrades gracefully (falls back
+    # to settings defaults) if the field is empty or malformed.
+    provider, _, model = provider_model.partition(":")
+    provider, model = (provider or None), (model or None)
+    report = _active_report(request, db, user)
+    run_id = generation_store.create_run()
+    generation_store.cleanup_old()
+    thread = threading.Thread(
+        target=_run_generation, args=(run_id, str(report.id), provider, model, include_income), daemon=True,
+    )
+    thread.start()
+    return templates.TemplateResponse(
+        request, "comparables/_ai_generation_progress.html", {"run_id": run_id},
+    )
+
+
+@router.get("/ai-generate/progress/{run_id}")
+async def ai_generate_progress_sse(run_id: str) -> StreamingResponse:
+    async def event_stream():
+        while True:
+            progress = generation_store.get(run_id)
+            if progress is None:
+                yield _sse("done", {"status": "error", "error": "Генерацията не е намерена (може да е изтекла)."})
+                break
+
+            yield _sse("progress", {
+                "status": progress.status, "step": progress.step,
+                "tokens_so_far": progress.tokens_so_far,
+            })
+
+            if progress.status in ("done", "error"):
+                yield _sse("done", {"status": progress.status, "error": progress.error})
+                break
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/ai-generate/result/{run_id}", response_class=HTMLResponse)
+async def ai_generate_result(request: Request, run_id: str):
+    progress = generation_store.get(run_id)
+    if progress is None or progress.status != "done":
+        return HTMLResponse('<p class="hint">Резултатът вече не е наличен.</p>')
+
+    r = progress.result
+    # Combined text for the "insert into report" action -- targets the
+    # EXISTING submarket_rationale textarea/save-form already on the page
+    # (see comparables.html) rather than a new backend route: this way
+    # nothing is persisted until the appraiser reviews it in that textarea
+    # and clicks its pre-existing "Запази" button themselves.
+    combined_text = (
+        f"{r['comparable_selection_rationale']}\n\n"
+        f"Коментар по сравними:\n{r['comparable_commentary']}\n\n"
+        f"{r['value_reasoning']}\n\n"
+        f"Ограничения: {r['caveats']}"
+    )
+    combined_income_text = None
+    income = r.get("income")
+    if income and income.get("available"):
+        combined_income_text = (
+            f"{income['rationale']}\n\n"
+            f"Коментар по наемни сравними:\n{income['commentary']}\n\n"
+            f"{income['reasoning']}\n\n"
+            f"Ограничения: {income['caveats']}"
+        )
+    return templates.TemplateResponse(
+        request, "comparables/_ai_generation_result.html",
+        {"result": r, "combined_text": combined_text, "combined_income_text": combined_income_text},
     )
 
 
@@ -358,6 +528,18 @@ async def save_submarket_rationale(
     report = _active_report(request, db, user)
     update_submarket_rationale(db, report.id, submarket_rationale.strip())
     return RedirectResponse(url="/comparables/#tab-content-sale", status_code=303)
+
+
+@router.post("/save-income-rationale")
+async def save_income_rationale(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    income_market_rationale: str = Form(""),
+):
+    report = _active_report(request, db, user)
+    update_income_market_rationale(db, report.id, income_market_rationale.strip())
+    return RedirectResponse(url="/comparables/#income-panel", status_code=303)
 
 
 @router.post("/save-legal-description")

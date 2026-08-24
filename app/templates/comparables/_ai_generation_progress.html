@@ -1,0 +1,42 @@
+{# Shown immediately after POST /comparables/ai-generate while the
+   background thread runs (Phase 7, Tier 3) -- SSE-driven live step/token
+   display, mirrors app/templates/scrape_progress.html's EventSource
+   pattern. #}
+<div id="ai-generation-progress-{{ run_id }}" style="margin-top:0.75rem;padding:0.75rem;background:var(--bg-alt,#f8fafc);border-radius:6px">
+  <p class="hint">
+    <span id="ai-gen-step-{{ run_id }}">Стартиране…</span>
+    &nbsp;·&nbsp; Токени досега: <strong id="ai-gen-tokens-{{ run_id }}">0</strong>
+  </p>
+  <div id="ai-gen-result-target-{{ run_id }}"></div>
+</div>
+
+<script>
+(function () {
+  var runId = {{ run_id | tojson }};
+  var es = new EventSource('/comparables/ai-generate/progress/' + runId);
+
+  es.addEventListener('progress', function (e) {
+    var data = JSON.parse(e.data);
+    document.getElementById('ai-gen-step-' + runId).textContent = data.step || '';
+    document.getElementById('ai-gen-tokens-' + runId).textContent = data.tokens_so_far || 0;
+  });
+
+  es.addEventListener('done', function (e) {
+    var data = JSON.parse(e.data);
+    es.close();
+    if (data.status === 'done') {
+      document.getElementById('ai-gen-step-' + runId).textContent = 'Готово';
+      htmx.ajax('GET', '/comparables/ai-generate/result/' + runId, {
+        target: '#ai-gen-result-target-' + runId, swap: 'innerHTML',
+      });
+    } else {
+      document.getElementById('ai-gen-step-' + runId).textContent = data.error || 'Грешка при генерирането.';
+    }
+  });
+
+  es.onerror = function () {
+    document.getElementById('ai-gen-step-' + runId).textContent = 'Връзката е прекъсната.';
+    es.close();
+  };
+})();
+</script>

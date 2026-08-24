@@ -166,6 +166,16 @@
     </div>
   </div>
 
+  <!-- ── Income market rationale (Phase 7, Tier 5) ─────────── -->
+  <details style="margin:0.6rem 0" {% if report.income_market_rationale %}open{% endif %}>
+    <summary class="hint" style="cursor:pointer">Обосновка на пазарния подход по доходи</summary>
+    <form method="post" action="/comparables/save-income-rationale" style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:flex-start">
+      <textarea name="income_market_rationale" rows="2" style="flex:1"
+                placeholder="Напр. защо са избрани точно тези наемни сравними, обосновка на допусканията в DCF">{{ report.income_market_rationale or '' }}</textarea>
+      <button type="submit" class="btn-clear btn-sm">Запази</button>
+    </form>
+  </details>
+
   <!-- ── Save to report ─────────────────────────────────── -->
   <div class="approach-save-bar">
     {% if report.concluded_value_income %}

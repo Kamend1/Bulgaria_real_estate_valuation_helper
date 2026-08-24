@@ -64,3 +64,20 @@ dvc-s3==3.3.0
 # inference time — not just scripts/backup_to_r2.py/train_avm_model.py
 # tooling anymore. See H2 in the audit for why this moved back here.
 boto3==1.43.0
+
+# ── AI-assisted valuation (Phase 7 — app/services/llm/) ──────────────────────
+# langchain-core: provider-agnostic BaseChatModel/Embeddings interfaces +
+# init_chat_model factory (app/services/llm/providers.py). langchain-openai:
+# the first concrete provider (per the phase's own sequencing — OpenAI first,
+# Anthropic/Gemini/Ollama added later as additional small packages, same
+# factory). pgvector: SQLAlchemy Vector column type for listing_embeddings —
+# NOT langchain-postgres's VectorStore wrapper, see plan doc for why.
+langchain-core==1.6.0
+langchain-openai==1.6.0
+# langchain-anthropic pins anthropic<1.0.0 itself (still 0.x) -- a known
+# constraint of the integration package, not something pinned here; basic
+# invoke/stream/tool-calling against current models is verified working on
+# it regardless (see plan doc).
+langchain-anthropic==1.6.1
+langchain-google-genai==4.3.5
+pgvector==0.5.0

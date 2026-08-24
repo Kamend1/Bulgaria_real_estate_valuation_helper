@@ -923,6 +923,14 @@ def update_submarket_rationale(db: Session, report_id: uuid.UUID, text: str | No
     db.commit()
 
 
+def update_income_market_rationale(db: Session, report_id: uuid.UUID, text: str | None) -> None:
+    report = db.get(AppraisalReport, report_id)
+    if not report:
+        return
+    report.income_market_rationale = text or None
+    db.commit()
+
+
 def update_residual_approach(
     db: Session,
     report_id: uuid.UUID,
@@ -934,6 +942,100 @@ def update_residual_approach(
     if concluded_value_residual is not None:
         report.concluded_value_residual = round(concluded_value_residual, 2)
     db.commit()
+
+
+# Bounds + defaults for compute_income_valuation()'s assumption params
+# (Phase 7, Tier 5 -- app/services/llm/tools.py's compute_income_valuation
+# tool enforces these server-side regardless of what the model requests, so
+# an out-of-range value from the model is clamped, never silently trusted).
+# Defaults match _income_analysis.html's JS panel's own pre-filled values,
+# so a report with no manually-saved income inputs gets the same starting
+# assumptions either way.
+INCOME_ASSUMPTION_BOUNDS = {
+    "expenses_pct": (10.0, 35.0),
+    "vacancy_pct": (2.0, 15.0),
+    "cap_rate_pct": (4.0, 12.0),
+    "growth_pct": (-2.0, 6.0),
+    "period_years": (3, 10),
+    "terminal_cap_rate_pct": (5.0, 12.0),
+}
+INCOME_ASSUMPTION_DEFAULTS = {
+    "expenses_pct": 20.0,
+    "vacancy_pct": 8.0,
+    "cap_rate_pct": 7.0,
+    "growth_pct": 2.0,
+    "period_years": 5,
+    "terminal_cap_rate_pct": 7.5,
+}
+
+
+def compute_income_valuation(
+    rent_per_sqm_month: float,
+    sale_price_per_sqm: float | None,
+    expenses_pct: float,
+    vacancy_pct: float,
+    cap_rate_pct: float,
+    growth_pct: float,
+    period_years: int,
+    terminal_cap_rate_pct: float,
+) -> dict:
+    """Direct capitalization + multi-year DCF with terminal value.
+
+    Pure Python port of _income_analysis.html's calcIncome() JS -- kept in
+    exact numeric parity (same formula, same variable roles) so this
+    produces the same figures the manual UI panel would show for identical
+    inputs. NOI = annual rent x (1-expenses) x (1-vacancy); the DCF
+    discounts NOI at cap_rate_pct (used as the discount rate, matching the
+    existing UI's own convention -- "use cap rate as discount rate") over
+    period_years with growth_pct annual rent growth, plus a terminal value
+    (NOI at year period+1 / terminal_cap_rate_pct, discounted back at the
+    same rate). All percentages are plain numbers (7.0 means 7%, not 0.07).
+    """
+    expenses = expenses_pct / 100
+    vacancy = vacancy_pct / 100
+    cap_rate = cap_rate_pct / 100
+    growth = growth_pct / 100
+    terminal_cap_rate = terminal_cap_rate_pct / 100
+
+    annual_rent = rent_per_sqm_month * 12
+    effective_pct = (1 - expenses) * (1 - vacancy)
+    noi = annual_rent * effective_pct
+
+    gross_yield_pct = (annual_rent / sale_price_per_sqm * 100) if sale_price_per_sqm else None
+    net_yield_pct = (noi / sale_price_per_sqm * 100) if sale_price_per_sqm else None
+    direct_value = (noi / cap_rate) if cap_rate > 0 else None
+
+    rows = []
+    pv = 0.0
+    current_noi = noi
+    r = cap_rate
+    for t in range(1, int(period_years) + 1):
+        pv_factor = 1 / ((1 + r) ** t)
+        pv_noi = current_noi * pv_factor
+        rows.append({
+            "year": t,
+            "noi": round(current_noi, 2),
+            "pv_factor": round(pv_factor, 4),
+            "pv_noi": round(pv_noi, 2),
+        })
+        pv += pv_noi
+        current_noi *= (1 + growth)
+
+    noi_terminal = noi * ((1 + growth) ** int(period_years))
+    tv_undiscounted = (noi_terminal / terminal_cap_rate) if terminal_cap_rate > 0 else 0.0
+    pv_tv = tv_undiscounted / ((1 + r) ** int(period_years))
+    dcf_value = pv + pv_tv
+
+    return {
+        "gross_yield_pct": round(gross_yield_pct, 2) if gross_yield_pct is not None else None,
+        "net_yield_pct": round(net_yield_pct, 2) if net_yield_pct is not None else None,
+        "noi_per_sqm_year": round(noi, 2),
+        "direct_value_per_sqm": round(direct_value, 2) if direct_value is not None else None,
+        "dcf_value_per_sqm": round(dcf_value, 2),
+        "dcf_rows": rows,
+        "terminal_value_pv_per_sqm": round(pv_tv, 2),
+        "terminal_value_undiscounted_per_sqm": round(tv_undiscounted, 2),
+    }
 
 
 def compute_weighted_conclusion(

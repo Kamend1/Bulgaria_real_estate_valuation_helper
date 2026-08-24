@@ -1,5 +1,6 @@
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger, Boolean, Column, Date, ForeignKey,
     Integer, Numeric, SmallInteger, String, Text,
@@ -11,6 +12,10 @@ from sqlalchemy.sql import func
 from sqlalchemy.types import TIMESTAMP
 
 from app.db.base import Base
+
+# text-embedding-3-small's default dimensionality -- see alembic/versions/
+# 0019_ai_valuation.py for the migration-side rationale.
+EMBEDDING_DIM = 1536
 
 
 # ── Taxonomy tables ────────────────────────────────────────────────────────────
@@ -210,6 +215,7 @@ class AppraisalReport(Base):
     legal_description_source = Column(String(20))  # agkk | manual
 
     submarket_rationale = Column(Text)   # why these comparables/this zone were chosen (F8)
+    income_market_rationale = Column(Text)   # AI/manual narrative for the income approach (Phase 7, Tier 5)
 
     annual_rent_estimate = Column(Numeric(14, 2))
     gross_rent_multiplier = Column(Numeric(6, 3))
@@ -326,6 +332,47 @@ class AvmModel(Base):
     # TF-IDF+SVD transformer fit on training descriptions (Round 3).
     # NULL for segments where it showed no benefit (office).
     text_transformer_path = Column(Text)
+
+
+class ListingEmbedding(Base):
+    """Semantic-text embedding of one listing (app/services/llm/listing_doc.py
+    builds the text; app/services/llm/embeddings.py builds the vector). One
+    row per (listing, provider, model) -- re-embedding upserts, see the
+    unique constraint."""
+    __tablename__ = "listing_embeddings"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    listing_id = Column(BigInteger, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(Text, nullable=False)     # e.g. "openai"
+    model = Column(Text, nullable=False)        # e.g. "text-embedding-3-small"
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
+    embedded_text = Column(Text, nullable=False)   # the exact text that was embedded, for debugging/audit
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("listing_id", "provider", "model", name="uq_listing_embeddings_listing_provider_model"),
+    )
+
+    listing = relationship("Listing")
+
+
+class AiValuationRun(Base):
+    """One AI-assisted valuation generation call -- cost/audit trail, mirrors
+    the AvmModel/ScrapeRun provenance pattern. `output` holds the full
+    structured ValuationBackbone response (JSONB)."""
+    __tablename__ = "ai_valuation_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(Text, nullable=False)
+    model = Column(Text, nullable=False)
+    input_tokens = Column(Integer)
+    output_tokens = Column(Integer)
+    estimated_cost_usd = Column(Numeric(10, 4))
+    output = Column(JSONB)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    report = relationship("AppraisalReport")
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
