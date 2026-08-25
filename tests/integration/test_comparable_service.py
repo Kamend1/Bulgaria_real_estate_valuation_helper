@@ -55,29 +55,63 @@ def test_update_sales_approach_noop_when_value_none(db_session):
     assert refreshed.concluded_value_sales_source == "manual"
 
 
-def test_update_income_approach_computes_annual_rent_cap_rate_and_concluded_value(db_session):
+def test_update_income_valuation_computes_annual_rent_cap_rate_and_concluded_value(db_session):
     report = _make_report(db_session, subject_area_sqm=80.0)
-    comparable_service.update_income_approach(
+    comparable_service.update_income_valuation(
         db_session, report.id,
         rent_per_sqm_month=10.0, cap_rate_pct=6.5,
-        concluded_per_sqm=1200.0, subject_area_sqm=None,
+        method="direct", source="manual",
     )
 
     refreshed = db_session.get(AppraisalReport, report.id)
     assert float(refreshed.annual_rent_estimate) == pytest.approx(120.0)          # 10 * 12
     assert float(refreshed.capitalization_rate) == pytest.approx(0.065)           # 6.5 / 100
-    assert float(refreshed.concluded_value_income) == pytest.approx(96000.0)      # 1200 * 80 (subject_area_sqm)
+
+    # concluded_value_income must be exactly area * the SAME direct_value_per_sqm
+    # compute_income_valuation() itself would produce for these inputs -- the
+    # whole point of the 2026-08-25 audit fix is that there is only one place
+    # (this function, via compute_income_valuation) that ever derives this
+    # number, so no other formula (JS or otherwise) can silently disagree.
+    expected = comparable_service.compute_income_valuation(
+        rent_per_sqm_month=10.0, sale_price_per_sqm=None,
+        expenses_pct=20.0, vacancy_pct=8.0, cap_rate_pct=6.5,
+        growth_pct=2.0, period_years=5, terminal_cap_rate_pct=7.5,
+    )
+    assert float(refreshed.concluded_value_income) == pytest.approx(expected["direct_value_per_sqm"] * 80.0, rel=1e-6)
+    assert refreshed.income_valuation_source == "manual"
+    assert refreshed.income_valuation_detail["method"] == "direct"
+    assert refreshed.income_valuation_detail["assumptions_used"]["cap_rate_pct"] == 6.5
+    assert refreshed.income_valuation_detail["assumptions_used"]["expenses_pct"] == 20.0   # default, not passed explicitly
 
 
-def test_update_income_approach_uses_explicit_area_over_subject_area(db_session):
+def test_update_income_valuation_uses_explicit_area_over_subject_area(db_session):
     report = _make_report(db_session, subject_area_sqm=80.0)
-    comparable_service.update_income_approach(
+    comparable_service.update_income_valuation(
         db_session, report.id,
-        rent_per_sqm_month=None, cap_rate_pct=None,
-        concluded_per_sqm=1000.0, subject_area_sqm=50.0,
+        rent_per_sqm_month=10.0, cap_rate_pct=6.5,
+        method="dcf", source="ai",
+        subject_area_sqm=50.0,
     )
     refreshed = db_session.get(AppraisalReport, report.id)
-    assert float(refreshed.concluded_value_income) == pytest.approx(50000.0)
+    expected = comparable_service.compute_income_valuation(
+        rent_per_sqm_month=10.0, sale_price_per_sqm=None,
+        expenses_pct=20.0, vacancy_pct=8.0, cap_rate_pct=6.5,
+        growth_pct=2.0, period_years=5, terminal_cap_rate_pct=7.5,
+    )
+    assert float(refreshed.concluded_value_income) == pytest.approx(expected["dcf_value_per_sqm"] * 50.0, rel=1e-6)
+    assert refreshed.income_valuation_source == "ai"
+    assert refreshed.income_valuation_detail["method"] == "dcf"
+
+
+def test_update_income_valuation_noop_when_rent_or_cap_rate_missing(db_session):
+    report = _make_report(db_session, subject_area_sqm=80.0, concluded_value_income=500.0)
+    comparable_service.update_income_valuation(
+        db_session, report.id,
+        rent_per_sqm_month=None, cap_rate_pct=6.5,
+        method="direct", source="manual",
+    )
+    refreshed = db_session.get(AppraisalReport, report.id)
+    assert float(refreshed.concluded_value_income) == pytest.approx(500.0)   # untouched -- nothing to compute without rent
 
 
 def test_update_residual_approach_sets_value(db_session):

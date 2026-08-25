@@ -43,7 +43,7 @@ from app.services.comparable_service import (
     remove_from_pool,
     toggle_pin,
     update_conclusion,
-    update_income_approach,
+    update_income_valuation,
     update_income_market_rationale,
     update_legal_description,
     update_pool_adjustment,
@@ -528,16 +528,42 @@ async def save_income_approach(
     user: User = Depends(get_current_user),
     rent_per_sqm_month: str = Form(""),
     cap_rate_pct: str = Form(""),
-    concluded_per_sqm: str = Form(""),
+    sale_price_per_sqm: str = Form(""),
+    expenses_pct: str = Form(""),
+    vacancy_pct: str = Form(""),
+    growth_pct: str = Form(""),
+    period_years: str = Form(""),
+    terminal_cap_rate_pct: str = Form(""),
+    method: str = Form("direct"),
     subject_area_sqm: str = Form(""),
+    source: str = Form("manual"),
 ):
+    # source is accepted from the form (unlike save-sales' hardcoded
+    # "manual") because it's purely a provenance label here, not a trust
+    # boundary -- the actual number is always freshly computed server-side
+    # by update_income_valuation() from the raw assumption inputs below,
+    # never taken as a client-submitted final figure. The AI-confirm button
+    # in _ai_generation_result.html posts source="ai" with the same
+    # assumptions_used the appraiser already reviewed on screen.
     def _f(v): return float(v) if v.strip() else None
+    def _i(v):
+        try:
+            return int(v) if v.strip() else None
+        except ValueError:
+            return None
     report = _active_report(request, db, user)
-    update_income_approach(
+    update_income_valuation(
         db, report.id,
         rent_per_sqm_month=_f(rent_per_sqm_month),
         cap_rate_pct=_f(cap_rate_pct),
-        concluded_per_sqm=_f(concluded_per_sqm),
+        method=method,
+        source=source,
+        sale_price_per_sqm=_f(sale_price_per_sqm),
+        expenses_pct=_f(expenses_pct),
+        vacancy_pct=_f(vacancy_pct),
+        growth_pct=_f(growth_pct),
+        period_years=_i(period_years),
+        terminal_cap_rate_pct=_f(terminal_cap_rate_pct),
         subject_area_sqm=_f(subject_area_sqm),
     )
     return RedirectResponse(url="/comparables/#income-panel", status_code=303)

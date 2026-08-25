@@ -368,6 +368,106 @@ def _write_adjustment_breakdown_table(doc: Document, pinned: list[dict]) -> None
             _fill_cell(cell, val, pt=8)
 
 
+_INCOME_SOURCE_LABELS = {
+    "manual": "изчислено ръчно от оценителя",
+    "ai": "изчислено от AI, потвърдено от оценителя",
+}
+
+
+def _write_income_valuation_table(doc: Document, report: AppraisalReport) -> None:
+    """NOI/direct-capitalization/DCF/sensitivity backing concluded_value_income
+    -- audit finding 2026-08-25: the document used to show only the final
+    per-sqm number with zero supporting detail, even though the exact same
+    breakdown was already computed and shown to the appraiser in the browser
+    (manual panel or AI panel). Renders report.income_valuation_detail,
+    populated by comparable_service.update_income_valuation() regardless of
+    which of those two paths produced it (see _INCOME_SOURCE_LABELS)."""
+    detail = report.income_valuation_detail
+    if not detail:
+        return
+
+    a = detail.get("assumptions_used", {})
+    method = detail.get("method", "direct")
+    source_label = _INCOME_SOURCE_LABELS.get(report.income_valuation_source, "")
+
+    p_title = doc.add_paragraph()
+    r_title = p_title.add_run("Изчисление на доходната стойност")
+    r_title.bold = True
+    r_title.font.size = Pt(10.5)
+    if source_label:
+        r_src = p_title.add_run(f"  ({source_label})")
+        r_src.italic = True
+        r_src.font.size = Pt(9)
+        r_src.font.color.rgb = _MUTED
+
+    p_assum = doc.add_paragraph(
+        f"Наем {_fmt(a.get('rent_per_sqm_month'), 1)} EUR/кв.м/мес  ·  "
+        f"Разходи {_fmt(a.get('expenses_pct'), 1)}%  ·  "
+        f"Незаетост {_fmt(a.get('vacancy_pct'), 1)}%  ·  "
+        f"Cap Rate {_fmt(a.get('cap_rate_pct'), 2)}%  ·  "
+        f"Ръст {_fmt(a.get('growth_pct'), 1)}%/год  ·  "
+        f"Хоризонт {a.get('period_years', '—')} год.  ·  "
+        f"Терм. Cap Rate {_fmt(a.get('terminal_cap_rate_pct'), 2)}%"
+    )
+    p_assum.runs[0].italic = True
+    p_assum.runs[0].font.size = Pt(9)
+    p_assum.runs[0].font.color.rgb = _MUTED
+
+    tbl_val = doc.add_table(rows=1, cols=3)
+    tbl_val.style = "Table Grid"
+    hdr = tbl_val.rows[0]
+    for cell, txt in zip(hdr.cells, ["Метод", "Формула", "Стойност (EUR/кв.м)"]):
+        _fill_cell(cell, txt, bold=True, pt=8.5, color=_WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _set_cell_bg(cell, "1E3A5F")
+
+    for key, label, formula in [
+        ("direct", "Директна капитализация", "NOI / Cap Rate"),
+        ("dcf", f"DCF ({a.get('period_years', '—')} год.)", "ΣPV(NOI) + PV(Изход)"),
+    ]:
+        row = tbl_val.add_row()
+        val = detail.get(f"{key}_value_per_sqm")
+        is_concluded = key == method
+        vals = [label, formula, _fmt(val)]
+        for cell, v in zip(row.cells, vals):
+            _fill_cell(cell, v, bold=is_concluded, pt=9)
+            if is_concluded:
+                _set_cell_bg(cell, "DCFCE7")
+
+    p_yield = doc.add_paragraph(
+        f"NOI/кв.м/год: {_fmt(detail.get('noi_per_sqm_year'), 1)} EUR"
+        + (f"  ·  Брутна доходност: {_fmt(detail.get('gross_yield_pct'), 2)}%" if detail.get("gross_yield_pct") is not None else "")
+        + (f"  ·  Нетна доходност: {_fmt(detail.get('net_yield_pct'), 2)}%" if detail.get("net_yield_pct") is not None else "")
+    )
+    p_yield.runs[0].font.size = Pt(9)
+
+    sens = detail.get("sensitivity")
+    if sens and sens.get("direct_value_grid_per_sqm"):
+        doc.add_paragraph()
+        p_sens_title = doc.add_paragraph()
+        r_sens_title = p_sens_title.add_run("Чувствителност (директна капитализация, EUR/кв.м)")
+        r_sens_title.bold = True
+        r_sens_title.font.size = Pt(9.5)
+
+        rent_variants = sens["rent_variants"]
+        cap_variants = sens["cap_rate_variants_pct"]
+        tbl_sens = doc.add_table(rows=1, cols=len(rent_variants) + 1)
+        tbl_sens.style = "Table Grid"
+        hdr2 = tbl_sens.rows[0]
+        _fill_cell(hdr2.cells[0], "Cap Rate ↓ / Наем →", bold=True, pt=8, color=_WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _set_cell_bg(hdr2.cells[0], "1E3A5F")
+        for cell, rv in zip(hdr2.cells[1:], rent_variants):
+            _fill_cell(cell, _fmt(rv, 1), bold=True, pt=8, color=_WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+            _set_cell_bg(cell, "1E3A5F")
+
+        for cr, row_vals in zip(cap_variants, sens["direct_value_grid_per_sqm"]):
+            row = tbl_sens.add_row()
+            _fill_cell(row.cells[0], f"{_fmt(cr, 2)}%", bold=True, pt=8)
+            for cell, val in zip(row.cells[1:], row_vals):
+                _fill_cell(cell, _fmt(val), pt=8, align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+    doc.add_paragraph()
+
+
 def _market_context_paragraph(db: Session, report: AppraisalReport) -> str | None:
     """Short, data-grounded market-context sentence for the sales-approach
     section, built from the app's own scraped listings (analytics_service's
@@ -654,12 +754,26 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
         r_cs.font.color.rgb = _BRAND_DARK
 
     # ── Section: Rent comparables (if any) ──────────────────────
-    if pinned_rent or pool_rent["total_count"] > 0:
+    # Audit finding 2026-08-25: this used to gate the WHOLE income section on
+    # having rent comparables in the pool -- an appraiser who typed a rent
+    # figure straight into the calculator (no rent pool at all, a legitimate
+    # path the UI allows) got a report with no income section whatsoever,
+    # even though concluded_value_income and the full NOI/DCF detail existed.
+    if pinned_rent or pool_rent["total_count"] > 0 or report.income_valuation_detail or report.income_market_rationale:
         section_num += 1
         doc.add_paragraph()
         h3 = doc.add_heading(f"{section_num}. Доходен подход — наемни сравними", level=1)
         if h3.runs:
             h3.runs[0].font.color.rgb = _BRAND_DARK
+
+        if report.income_market_rationale:
+            p_ir_lbl = doc.add_paragraph()
+            r_ir_lbl = p_ir_lbl.add_run("Обосновка на доходния подход: ")
+            r_ir_lbl.bold = True
+            r_ir_lbl.font.size = Pt(9.5)
+            r_ir_txt = p_ir_lbl.add_run(report.income_market_rationale)
+            r_ir_txt.font.size = Pt(9.5)
+            doc.add_paragraph()
 
         if pinned_rent:
             _write_comp_table(doc, pinned_rent, "rent", report, pool_rent["stats"])
@@ -668,6 +782,9 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
             p_no2 = doc.add_paragraph("Няма закачени (\U0001F4CC) наемни сравними за доклада.")
             p_no2.runs[0].italic = True
             p_no2.runs[0].font.size = Pt(10)
+
+        doc.add_paragraph()
+        _write_income_valuation_table(doc, report)
 
         if report.concluded_value_income:
             doc.add_paragraph()
@@ -865,24 +982,68 @@ def update_subject(db: Session, report_id: uuid.UUID, data: dict) -> None:
     db.commit()
 
 
-def update_income_approach(
+def update_income_valuation(
     db: Session,
     report_id: uuid.UUID,
     rent_per_sqm_month: float | None,
     cap_rate_pct: float | None,
-    concluded_per_sqm: float | None,
-    subject_area_sqm: float | None,
+    method: str,
+    source: str,
+    sale_price_per_sqm: float | None = None,
+    expenses_pct: float | None = None,
+    vacancy_pct: float | None = None,
+    growth_pct: float | None = None,
+    period_years: int | None = None,
+    terminal_cap_rate_pct: float | None = None,
+    subject_area_sqm: float | None = None,
 ) -> None:
+    """Replaces the old update_income_approach (2026-08-25 audit): that
+    version only ever persisted rent/cap_rate/the final per-sqm number,
+    typed or computed client-side and trusted as-is -- generate_docx()/
+    export_excel() had no NOI/DCF/sensitivity detail to show, only the bare
+    concluded value, and a manual save could never numerically match what
+    the AI tool's compute_income_valuation() would have produced for the
+    same inputs (two separate formula implementations, JS vs Python).
+
+    This is now the ONLY place either the manual save form (rent/cap_rate/
+    etc as raw inputs) or the AI-confirm buttons (assumptions_used already
+    computed once by the same compute_income_valuation() the AI tool calls)
+    write to -- both route through this one function, so the persisted
+    number is always server-computed by the single canonical
+    compute_income_valuation(), never a client-submitted final figure.
+    `source` ("manual" | "ai") is just a provenance label for display, not a
+    trust boundary -- see comparable_service.compute_income_valuation.
+    """
     report = db.get(AppraisalReport, report_id)
-    if not report:
+    if not report or rent_per_sqm_month is None or cap_rate_pct is None:
         return
-    if rent_per_sqm_month is not None:
-        report.annual_rent_estimate = round(rent_per_sqm_month * 12, 2)
-    if cap_rate_pct is not None:
-        report.capitalization_rate = round(cap_rate_pct / 100, 6)
-    if concluded_per_sqm is not None:
-        area = subject_area_sqm or float(report.subject_area_sqm or 0)
-        report.concluded_value_income = round(concluded_per_sqm * area, 2) if area > 0 else round(concluded_per_sqm, 2)
+
+    d = INCOME_ASSUMPTION_DEFAULTS
+    kwargs = dict(
+        rent_per_sqm_month=rent_per_sqm_month,
+        sale_price_per_sqm=sale_price_per_sqm,
+        expenses_pct=expenses_pct if expenses_pct is not None else d["expenses_pct"],
+        vacancy_pct=vacancy_pct if vacancy_pct is not None else d["vacancy_pct"],
+        cap_rate_pct=cap_rate_pct,
+        growth_pct=growth_pct if growth_pct is not None else d["growth_pct"],
+        period_years=int(period_years) if period_years else d["period_years"],
+        terminal_cap_rate_pct=terminal_cap_rate_pct if terminal_cap_rate_pct is not None else d["terminal_cap_rate_pct"],
+    )
+    detail = compute_income_valuation(**kwargs)
+    detail["assumptions_used"] = dict(kwargs)
+
+    method = method if method in ("direct", "dcf") else "direct"
+    detail["method"] = method
+    ppsqm = detail["direct_value_per_sqm"] if method == "direct" else detail["dcf_value_per_sqm"]
+
+    report.annual_rent_estimate = round(rent_per_sqm_month * 12, 2)
+    report.capitalization_rate = round(cap_rate_pct / 100, 6)
+    report.income_valuation_detail = detail
+    report.income_valuation_source = source if source in ("manual", "ai") else "manual"
+
+    area = subject_area_sqm or float(report.subject_area_sqm or 0)
+    if ppsqm is not None and area > 0:
+        report.concluded_value_income = round(ppsqm * area, 2)
     db.commit()
 
 
@@ -1350,12 +1511,129 @@ def _floor_str(item: dict) -> str:
     return f"{f if f is not None else '?'}/{t}" if t else (str(f) if f is not None else "—")
 
 
+def _section_row(ws, label: str) -> None:
+    ws.append([label])
+    cell = ws.cell(row=ws.max_row, column=1)
+    cell.font = _HEADER_FONT
+    cell.fill = _HEADER_FILL
+
+
+def _label_row(ws, label: str, value) -> None:
+    ws.append([label, value if value not in (None, "") else "—"])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+
+
+def _write_summary_sheet(wb, db: Session, report: AppraisalReport) -> None:
+    """Same content as generate_docx()'s narrative sections (subject, legal,
+    market/income narrative + income NOI/DCF/sensitivity detail, conclusion)
+    -- audit finding 2026-08-25: export_excel() used to write ONLY the raw
+    comparable tables, nothing else the appraiser built on the comparables
+    page, making Word and Excel two disconnected deliverables instead of one
+    process. First sheet in the workbook, ahead of the comparable tables."""
+    ws = wb.create_sheet("Обобщение")
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 60
+
+    _section_row(ws, "Обект")
+    _label_row(ws, "Адрес", report.subject_address)
+    _label_row(ws, "Град", report.subject_city)
+    _label_row(ws, "Площ (кв.м)", float(report.subject_area_sqm) if report.subject_area_sqm else None)
+    _label_row(ws, "Етаж / Общо етажи", f"{report.subject_floor or '—'} / {report.subject_total_floors or '—'}")
+    _label_row(ws, "Тип строителство", report.subject_construction)
+    _label_row(ws, "Година на строеж", report.subject_year)
+    _label_row(ws, "Дата на оценка", report.valuation_date.strftime("%d.%m.%Y") if report.valuation_date else None)
+    _label_row(ws, "Описание", report.subject_description)
+
+    if report.legal_description:
+        ws.append([])
+        _section_row(ws, "Правно и градоустройствено състояние")
+        _label_row(ws, "Кадастрален идентификатор", report.subject_cadastral_id)
+        ws.append(["Описание", report.legal_description])
+
+    ws.append([])
+    _section_row(ws, "Пазарен подход")
+    market_ctx = _market_context_paragraph(db, report)
+    if market_ctx:
+        ws.append(["Пазарен контекст", market_ctx])
+    if report.submarket_rationale:
+        ws.append(["Обосновка на съпоставимата зона", report.submarket_rationale])
+    _label_row(ws, "Стойност по пазарен подход (EUR/кв.м)", float(report.concluded_value_sales) if report.concluded_value_sales else None)
+
+    if report.income_market_rationale or report.income_valuation_detail or report.concluded_value_income:
+        ws.append([])
+        _section_row(ws, "Доходен подход")
+        if report.income_market_rationale:
+            ws.append(["Обосновка на доходния подход", report.income_market_rationale])
+        detail = report.income_valuation_detail
+        if detail:
+            a = detail.get("assumptions_used", {})
+            source_label = _INCOME_SOURCE_LABELS.get(report.income_valuation_source, "")
+            _label_row(ws, "Наем (EUR/кв.м/мес)", a.get("rent_per_sqm_month"))
+            _label_row(ws, "Разходи %", a.get("expenses_pct"))
+            _label_row(ws, "Незаетост %", a.get("vacancy_pct"))
+            _label_row(ws, "Cap Rate %", a.get("cap_rate_pct"))
+            _label_row(ws, "Ръст наем %/год", a.get("growth_pct"))
+            _label_row(ws, "Хоризонт (год.)", a.get("period_years"))
+            _label_row(ws, "Терминален Cap Rate %", a.get("terminal_cap_rate_pct"))
+            _label_row(ws, "NOI/кв.м/год (EUR)", detail.get("noi_per_sqm_year"))
+            _label_row(ws, "Стойност — директна капитализация (EUR/кв.м)", detail.get("direct_value_per_sqm"))
+            _label_row(ws, "Стойност — DCF (EUR/кв.м)", detail.get("dcf_value_per_sqm"))
+            _label_row(ws, "Брутна доходност %", detail.get("gross_yield_pct"))
+            _label_row(ws, "Нетна доходност %", detail.get("net_yield_pct"))
+            _label_row(ws, "Използван метод за заключение", "DCF" if detail.get("method") == "dcf" else "Директна капитализация")
+            if source_label:
+                _label_row(ws, "Източник на изчислението", source_label)
+
+            sens = detail.get("sensitivity")
+            if sens and sens.get("direct_value_grid_per_sqm"):
+                ws.append([])
+                ws.append(["Чувствителност (директна капитализация, EUR/кв.м)"])
+                ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+                header_row = ["Cap Rate ↓ / Наем →"] + [round(v, 1) for v in sens["rent_variants"]]
+                ws.append(header_row)
+                for cell in ws[ws.max_row]:
+                    cell.font = _HEADER_FONT
+                    cell.fill = _HEADER_FILL
+                for cr, row_vals in zip(sens["cap_rate_variants_pct"], sens["direct_value_grid_per_sqm"]):
+                    ws.append([f"{cr}%"] + row_vals)
+        _label_row(ws, "Стойност по доходен подход (EUR)", float(report.concluded_value_income) if report.concluded_value_income else None)
+
+    if report.concluded_value_residual:
+        ws.append([])
+        _section_row(ws, "Остатъчен подход")
+        _label_row(ws, "Стойност на парцела (EUR)", float(report.concluded_value_residual))
+
+    ws.append([])
+    _section_row(ws, "Заключение")
+    if report.concluded_value_sales:
+        ws.append(["Пазарна стойност (пазарен подход)", float(report.concluded_value_sales), f"{report.weight_sales_pct}%" if report.weight_sales_pct is not None else "—"])
+    if report.concluded_value_income:
+        ws.append(["Пазарна стойност (доходен подход)", float(report.concluded_value_income), f"{report.weight_income_pct}%" if report.weight_income_pct is not None else "—"])
+    if report.concluded_value_residual:
+        ws.append(["Стойност на парцела (остатъчен метод)", float(report.concluded_value_residual), f"{report.weight_residual_pct}%" if report.weight_residual_pct is not None else "—"])
+    if report.concluded_value:
+        ws.append(["КРАЙНА ОЦЕНЕНА СТОЙНОСТ (претеглена)", float(report.concluded_value), f"{report.concluded_currency or 'EUR'}"])
+        for cell in ws[ws.max_row]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1E3A5F")
+    if report.weighting_rationale:
+        ws.append(["Обосновка на теглата", report.weighting_rationale])
+    if report.appraiser_notes:
+        ws.append(["Бележки на оценителя", report.appraiser_notes])
+
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+
 def export_excel(db: Session, report: AppraisalReport) -> io.BytesIO:
     pool_sale = get_pool_with_stats(db, "sale", report.id)
     pool_rent = get_pool_with_stats(db, "rent", report.id)
 
     wb = Workbook()
     wb.remove(wb.active)
+
+    _write_summary_sheet(wb, db, report)
 
     def _subject_row(ws, ncols: int) -> None:
         if not (report and report.subject_address):

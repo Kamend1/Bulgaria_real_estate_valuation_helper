@@ -188,9 +188,45 @@
 <h4 style="margin-bottom:0.25rem">Ограничения (доходен подход)</h4>
 <p>{{ r.income.caveats }}</p>
 
+<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
 <button type="button" class="btn-primary btn-sm ai-insert-income-btn" data-text="{{ combined_income_text }}">
   Вмъкни в обосновката на доходния подход
 </button>
+{# Confirms the SAME numbers already shown above -- no new LLM call, no extra
+   cost. Posts the tool's own assumptions_used to the same save-income route
+   the manual calculator uses, so the server recomputes canonically via
+   compute_income_valuation() rather than trusting a client-submitted final
+   figure (2026-08-25 audit: "one logical process" fix -- these numbers used
+   to be visible only here and nowhere in the exported report). #}
+<form method="post" action="/comparables/save-income" style="display:inline">
+  <input type="hidden" name="rent_per_sqm_month" value="{{ v.assumptions_used.rent_per_sqm_month }}">
+  <input type="hidden" name="sale_price_per_sqm" value="{{ v.assumptions_used.sale_price_per_sqm or '' }}">
+  <input type="hidden" name="expenses_pct" value="{{ v.assumptions_used.expenses_pct }}">
+  <input type="hidden" name="vacancy_pct" value="{{ v.assumptions_used.vacancy_pct }}">
+  <input type="hidden" name="cap_rate_pct" value="{{ v.assumptions_used.cap_rate_pct }}">
+  <input type="hidden" name="growth_pct" value="{{ v.assumptions_used.growth_pct }}">
+  <input type="hidden" name="period_years" value="{{ v.assumptions_used.period_years }}">
+  <input type="hidden" name="terminal_cap_rate_pct" value="{{ v.assumptions_used.terminal_cap_rate_pct }}">
+  <input type="hidden" name="method" value="direct">
+  <input type="hidden" name="source" value="ai">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  <button type="submit" class="btn-clear btn-sm">Потвърди — директна капитализация</button>
+</form>
+<form method="post" action="/comparables/save-income" style="display:inline">
+  <input type="hidden" name="rent_per_sqm_month" value="{{ v.assumptions_used.rent_per_sqm_month }}">
+  <input type="hidden" name="sale_price_per_sqm" value="{{ v.assumptions_used.sale_price_per_sqm or '' }}">
+  <input type="hidden" name="expenses_pct" value="{{ v.assumptions_used.expenses_pct }}">
+  <input type="hidden" name="vacancy_pct" value="{{ v.assumptions_used.vacancy_pct }}">
+  <input type="hidden" name="cap_rate_pct" value="{{ v.assumptions_used.cap_rate_pct }}">
+  <input type="hidden" name="growth_pct" value="{{ v.assumptions_used.growth_pct }}">
+  <input type="hidden" name="period_years" value="{{ v.assumptions_used.period_years }}">
+  <input type="hidden" name="terminal_cap_rate_pct" value="{{ v.assumptions_used.terminal_cap_rate_pct }}">
+  <input type="hidden" name="method" value="dcf">
+  <input type="hidden" name="source" value="ai">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  <button type="submit" class="btn-clear btn-sm">Потвърди — DCF</button>
+</form>
+</div>
 {% endif %}
 {% endif %}
 

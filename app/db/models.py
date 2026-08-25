@@ -223,6 +223,14 @@ class AppraisalReport(Base):
     concluded_value_income = Column(Numeric(14, 2))
     concluded_value_residual = Column(Numeric(14, 2))
 
+    # Full compute_income_valuation() result (NOI, direct-cap, DCF, yields,
+    # sensitivity grid, assumptions_used) behind concluded_value_income above
+    # -- without this, the report only ever kept the single final number,
+    # with no way to show how it was derived (audit finding, 2026-08-25).
+    # source mirrors concluded_value_sales_source's manual|avm pattern.
+    income_valuation_detail = Column(JSONB)
+    income_valuation_source = Column(String(20))   # manual | ai
+
     # Weight (%) each approach carries in the final concluded_value below --
     # only approaches with both a weight and a saved concluded_value_* are
     # included in the weighted average (see comparable_service.update_conclusion).

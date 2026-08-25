@@ -212,10 +212,17 @@
         <div class="res-computed res-computed-hl" id="save-inc-total-display">—</div>
       </div>
       <form method="post" action="/comparables/save-income" id="income-save-form" style="display:flex;align-items:flex-end">
-        <input type="hidden" name="rent_per_sqm_month" id="frm-inc-rent">
-        <input type="hidden" name="cap_rate_pct"       id="frm-inc-caprate">
-        <input type="hidden" name="concluded_per_sqm"  id="frm-inc-ppsqm">
-        <input type="hidden" name="subject_area_sqm"   id="frm-inc-area-val">
+        <input type="hidden" name="rent_per_sqm_month"    id="frm-inc-rent">
+        <input type="hidden" name="cap_rate_pct"          id="frm-inc-caprate">
+        <input type="hidden" name="sale_price_per_sqm"    id="frm-inc-sale">
+        <input type="hidden" name="expenses_pct"          id="frm-inc-expenses">
+        <input type="hidden" name="vacancy_pct"           id="frm-inc-vacancy">
+        <input type="hidden" name="growth_pct"            id="frm-inc-growth">
+        <input type="hidden" name="period_years"          id="frm-inc-period">
+        <input type="hidden" name="terminal_cap_rate_pct" id="frm-inc-terminal">
+        <input type="hidden" name="method"                id="frm-inc-method">
+        <input type="hidden" name="subject_area_sqm"      id="frm-inc-area-val">
+        <input type="hidden" name="source" value="manual">
         <button type="submit" id="btn-save-income" class="btn-primary" disabled
                 style="white-space:nowrap">Закачи към доклада</button>
       </form>
@@ -246,10 +253,21 @@ function updateIncomeSave() {
   var btn = _el('btn-save-income');
   if (btn) btn.disabled = !(ppsqm > 0 && area > 0);
   var _set = function(id, v) { var el = _el(id); if (el) el.value = v; };
-  _set('frm-inc-rent',     _incVals.rent    ? _incVals.rent.toFixed(2)           : '');
-  _set('frm-inc-caprate',  _incVals.capRate ? (_incVals.capRate * 100).toFixed(2) : '');
-  _set('frm-inc-ppsqm',    ppsqm > 0 ? Math.round(ppsqm) : '');
-  _set('frm-inc-area-val', area  > 0 ? area              : '');
+  // Raw assumption inputs, not the client-computed ppsqm -- the server
+  // recomputes NOI/direct/DCF via the same compute_income_valuation() the
+  // AI tool uses, so the persisted number is never a trusted client figure
+  // (2026-08-25 audit: this used to submit only a pre-computed final ppsqm,
+  // with no supporting detail the export could show).
+  _set('frm-inc-rent',      _v('inc-rent'));
+  _set('frm-inc-caprate',   _v('inc-caprate'));
+  _set('frm-inc-sale',      _v('inc-sale') || '');
+  _set('frm-inc-expenses',  _v('inc-expenses'));
+  _set('frm-inc-vacancy',   _v('inc-vacancy'));
+  _set('frm-inc-growth',    _v('inc-growth'));
+  _set('frm-inc-period',    _v('inc-period'));
+  _set('frm-inc-terminal',  _v('inc-terminal'));
+  _set('frm-inc-method',    method);
+  _set('frm-inc-area-val',  area > 0 ? area : '');
 }
 
 function calcIncome() {
