@@ -102,6 +102,20 @@
         <input type="number" name="max_ppsqm" value="{{ filters.max_ppsqm or '' }}" placeholder="до">
       </div>
 
+      <!-- Година на строителство -->
+      <label class="filter-label">Година на строителство</label>
+      <div class="range-row">
+        <input type="number" name="min_construction_year" value="{{ filters.min_construction_year or '' }}" placeholder="от">
+        <input type="number" name="max_construction_year" value="{{ filters.max_construction_year or '' }}" placeholder="до">
+      </div>
+
+      <!-- Етаж -->
+      <label class="filter-label">Етаж</label>
+      <div class="range-row">
+        <input type="number" name="min_floor" value="{{ filters.min_floor if filters.min_floor is not none else '' }}" placeholder="от">
+        <input type="number" name="max_floor" value="{{ filters.max_floor if filters.max_floor is not none else '' }}" placeholder="до">
+      </div>
+
       <!-- Сортиране -->
       <label class="filter-label">Сортиране</label>
       <select name="sort">

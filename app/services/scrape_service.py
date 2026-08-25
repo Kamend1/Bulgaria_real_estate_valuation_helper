@@ -515,6 +515,20 @@ def run_scrape_background(
         except Exception as _ae:
             progress_run.push("log", {"message": f"Предупреждение: аналитиката не се обнови ({_ae})"})
 
+        # 9. Embeddings: re-embed listings touched by this run (new or changed
+        # since last embedded). Scoped to db_run_id, not the whole corpus --
+        # see app/services/llm/embed_backfill.py. Non-fatal: missing
+        # OPENAI_API_KEY or a transient API error should not fail the scrape.
+        try:
+            from app.services.llm.embed_backfill import backfill_embeddings
+
+            progress_run.push("log", {"message": "Обновяване на семантични вектори (embeddings) за нови/променени обяви…"})
+            with db_session() as session:
+                n_embedded = backfill_embeddings(session, run_id=db_run_id)
+            progress_run.push("log", {"message": f"Embeddings: {n_embedded} обяви ембед-нати/обновени."})
+        except Exception as _ee:
+            progress_run.push("log", {"message": f"Предупреждение: embeddings не се обновиха ({_ee})"})
+
         progress_run.status = "completed"
         progress_run.finished_at = datetime.utcnow()
         progress_run.push("done", progress_run.to_dict())

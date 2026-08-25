@@ -32,11 +32,21 @@ def _parse_filters(
     max_area: str = Query(""),
     min_ppsqm: str = Query(""),
     max_ppsqm: str = Query(""),
+    min_construction_year: str = Query(""),
+    max_construction_year: str = Query(""),
+    min_floor: str = Query(""),
+    max_floor: str = Query(""),
     sort: str = Query("last_seen"),
 ) -> SearchFilters:
     def _f(v: str) -> float | None:
         try:
             return float(v) if v.strip() else None
+        except ValueError:
+            return None
+
+    def _i(v: str) -> int | None:
+        try:
+            return int(v) if v.strip() else None
         except ValueError:
             return None
 
@@ -52,6 +62,10 @@ def _parse_filters(
         max_area=_f(max_area),
         min_ppsqm=_f(min_ppsqm),
         max_ppsqm=_f(max_ppsqm),
+        min_construction_year=_i(min_construction_year),
+        max_construction_year=_i(max_construction_year),
+        min_floor=_i(min_floor),
+        max_floor=_i(max_floor),
         sort=sort,
     )
 

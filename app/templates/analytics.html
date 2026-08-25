@@ -83,6 +83,11 @@
     margin-top: 0.2rem;
   }
   .kpi-card.accent { border-left: 3px solid var(--brand); }
+  .kpi-delta {
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 0.2rem;
+  }
 
   /* Chart cards */
   .chart-grid {
@@ -258,17 +263,38 @@
   <div class="kpi-card accent">
     <div class="kpi-label">Медиана EUR/кв.м</div>
     <div class="kpi-value">{{ "{:,.0f}".format(latest.median_ppsqm) if latest.median_ppsqm else "—" }}</div>
+    {% if kpi_deltas.median_ppsqm is not none %}
+    <div class="kpi-delta trend-{{ 'up' if kpi_deltas.median_ppsqm > 0 else ('down' if kpi_deltas.median_ppsqm < 0 else 'same') }}">
+      {{ '▲' if kpi_deltas.median_ppsqm > 0 else ('▼' if kpi_deltas.median_ppsqm < 0 else '=') }}
+      {{ "%+.1f"|format(kpi_deltas.median_ppsqm) }}% спрямо предх. засичане
+    </div>
+    {% else %}
     <div class="kpi-unit">последно засичане</div>
+    {% endif %}
   </div>
   <div class="kpi-card">
     <div class="kpi-label">Обяви</div>
     <div class="kpi-value">{{ "{:,}".format(latest.n_listings) if latest.n_listings else "—" }}</div>
+    {% if kpi_deltas.n_listings is not none %}
+    <div class="kpi-delta trend-{{ 'up' if kpi_deltas.n_listings > 0 else ('down' if kpi_deltas.n_listings < 0 else 'same') }}">
+      {{ '▲' if kpi_deltas.n_listings > 0 else ('▼' if kpi_deltas.n_listings < 0 else '=') }}
+      {{ "%+.1f"|format(kpi_deltas.n_listings) }}% спрямо предх. засичане
+    </div>
+    {% else %}
     <div class="kpi-unit">последно засичане</div>
+    {% endif %}
   </div>
   <div class="kpi-card">
     <div class="kpi-label">Медиана DOM</div>
     <div class="kpi-value">{{ latest.median_dom if latest.median_dom else "—" }}</div>
+    {% if kpi_deltas.median_dom is not none %}
+    <div class="kpi-delta trend-{{ 'up' if kpi_deltas.median_dom > 0 else ('down' if kpi_deltas.median_dom < 0 else 'same') }}">
+      {{ '▲' if kpi_deltas.median_dom > 0 else ('▼' if kpi_deltas.median_dom < 0 else '=') }}
+      {{ "%+.1f"|format(kpi_deltas.median_dom) }}% спрямо предх. засичане
+    </div>
+    {% else %}
     <div class="kpi-unit">дни на пазара</div>
+    {% endif %}
   </div>
   <div class="kpi-card">
     <div class="kpi-label">P25 / P75</div>

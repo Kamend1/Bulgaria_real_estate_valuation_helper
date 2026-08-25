@@ -5,14 +5,22 @@ comparable retrieval).
 
 Ports the standalone-script pattern already used by
 scripts/train_avm_model.py: read live DB data, no web app involved, safe to
-re-run (crash-resumable — already-embedded rows for the current
-provider/model are skipped, matching listing_embeddings' unique constraint
-on (listing_id, provider, model)).
+re-run (crash-resumable -- candidate selection lives in
+app/services/llm/embed_backfill.py, shared with the automatic post-scrape
+hook in scrape_service.py, and picks up both never-embedded listings AND
+previously-embedded listings whose text changed since -- see that module's
+docstring).
 
 Usage (from project root):
-    python -m scripts.embed_listings                  # embed everything still missing
+    python -m scripts.embed_listings                  # full-corpus catch-up: embed everything missing or changed
     python -m scripts.embed_listings --limit 50        # small test run
     python -m scripts.embed_listings --dry-run         # build + print text only, no API calls, no DB writes
+
+Note: routine re-scrapes no longer need this run manually -- scrape_service.py
+calls the same backfill automatically (scoped to the just-completed run) at
+the end of every scrape. This script remains for the initial full-corpus
+backfill and for catching up after enabling embeddings for the first time,
+switching provider/model, or if the automatic hook ever fails.
 
 Requires OPENAI_API_KEY in .env (real cost — each call is billed by OpenAI;
 see app/services/llm/embeddings.py for the model used).
@@ -30,34 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-from app.db.models import Listing, ListingEmbedding
 from app.db.session import db_session
-from app.services.llm.embeddings import get_embeddings_model, resolve_embedding_model
+from app.services.llm.embed_backfill import backfill_embeddings, find_embedding_candidates
+from app.services.llm.embeddings import resolve_embedding_model
 from app.services.llm.listing_doc import listing_to_text
-
-BATCH_SIZE = 100
-
-
-def _listings_needing_embedding(db, provider: str, model: str, limit: int | None):
-    already = (
-        select(ListingEmbedding.listing_id)
-        .where(ListingEmbedding.provider == provider, ListingEmbedding.model == model)
-    )
-    query = (
-        select(Listing)
-        .where(
-            Listing.training_eligible.is_(True),
-            Listing.status == "active",
-            Listing.id.notin_(already),
-        )
-        .order_by(Listing.id)
-    )
-    if limit:
-        query = query.limit(limit)
-    return db.execute(query).scalars().all()
 
 
 def main() -> None:
@@ -70,46 +54,19 @@ def main() -> None:
     provider, model = resolve_embedding_model(args.provider)
 
     with db_session() as db:
-        rows = _listings_needing_embedding(db, provider, model, args.limit)
-        print(f"{len(rows)} listing(s) need embedding (provider={provider}, model={model})")
-        if not rows:
-            return
-
         if args.dry_run:
+            rows = find_embedding_candidates(db, provider, model, limit=args.limit)
+            print(f"{len(rows)} listing(s) need embedding (provider={provider}, model={model})")
             for row in rows[:3]:
                 print(f"--- id {row.id} ---")
                 print(listing_to_text(row))
             print(f"(dry run — {len(rows)} total, showing up to 3)")
             return
 
-        embeddings_model = get_embeddings_model(provider=provider, model=model)
+        def _progress(done: int, total: int) -> None:
+            print(f"  embedded {done}/{total}")
 
-        done = 0
-        for start in range(0, len(rows), BATCH_SIZE):
-            batch = rows[start:start + BATCH_SIZE]
-            texts = [listing_to_text(r) for r in batch]
-            vectors = embeddings_model.embed_documents(texts)
-
-            stmt = pg_insert(ListingEmbedding).values([
-                {
-                    "listing_id": r.id,
-                    "provider": provider,
-                    "model": model,
-                    "embedding": vec,
-                    "embedded_text": text,
-                }
-                for r, text, vec in zip(batch, texts, vectors)
-            ])
-            stmt = stmt.on_conflict_do_update(
-                constraint="uq_listing_embeddings_listing_provider_model",
-                set_={"embedding": stmt.excluded.embedding, "embedded_text": stmt.excluded.embedded_text},
-            )
-            db.execute(stmt)
-            db.commit()
-
-            done += len(batch)
-            print(f"  embedded {done}/{len(rows)}")
-
+        done = backfill_embeddings(db, provider=provider, model=model, limit=args.limit, on_batch=_progress)
         print(f"Done — {done} listing(s) embedded with {provider}/{model}.")
 
 

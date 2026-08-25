@@ -54,6 +54,10 @@ class SearchFilters:
     max_area: float | None = None
     min_ppsqm: float | None = None
     max_ppsqm: float | None = None
+    min_construction_year: int | None = None
+    max_construction_year: int | None = None
+    min_floor: int | None = None
+    max_floor: int | None = None
     sort: str = "last_seen"
 
     def to_query_string(self, exclude: set[str] | None = None) -> str:
@@ -140,6 +144,20 @@ def search_listings(
     if filters.max_ppsqm is not None:
         conditions.append("l.price_per_sqm_model <= :max_ppsqm")
         params["max_ppsqm"] = filters.max_ppsqm
+
+    if filters.min_construction_year is not None:
+        conditions.append("l.construction_year_model >= :min_construction_year")
+        params["min_construction_year"] = filters.min_construction_year
+    if filters.max_construction_year is not None:
+        conditions.append("l.construction_year_model <= :max_construction_year")
+        params["max_construction_year"] = filters.max_construction_year
+
+    if filters.min_floor is not None:
+        conditions.append("l.floor_model >= :min_floor")
+        params["min_floor"] = filters.min_floor
+    if filters.max_floor is not None:
+        conditions.append("l.floor_model <= :max_floor")
+        params["max_floor"] = filters.max_floor
 
     where_sql = " AND ".join(conditions)
     order_sql = _SORT_SQL.get(filters.sort, _SORT_SQL["last_seen"])
@@ -280,6 +298,18 @@ def get_all_listing_ids(db: Session, filters: SearchFilters) -> list[int]:
     if filters.max_ppsqm is not None:
         conditions.append("l.price_per_sqm_model <= :max_ppsqm")
         params["max_ppsqm"] = filters.max_ppsqm
+    if filters.min_construction_year is not None:
+        conditions.append("l.construction_year_model >= :min_construction_year")
+        params["min_construction_year"] = filters.min_construction_year
+    if filters.max_construction_year is not None:
+        conditions.append("l.construction_year_model <= :max_construction_year")
+        params["max_construction_year"] = filters.max_construction_year
+    if filters.min_floor is not None:
+        conditions.append("l.floor_model >= :min_floor")
+        params["min_floor"] = filters.min_floor
+    if filters.max_floor is not None:
+        conditions.append("l.floor_model <= :max_floor")
+        params["max_floor"] = filters.max_floor
 
     where_sql = " AND ".join(conditions)
     rows = db.execute(

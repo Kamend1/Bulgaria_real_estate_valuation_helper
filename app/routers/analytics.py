@@ -27,6 +27,13 @@ _N_RUNS_OPTIONS = [
 ]
 
 
+def _pct_delta(cur: float | int | None, prev: float | int | None) -> float | None:
+    """% change from `prev` to `cur`, or None if either side is missing/zero."""
+    if cur is None or prev is None or prev == 0:
+        return None
+    return round((cur - prev) / prev * 100, 1)
+
+
 @router.get("/", response_class=HTMLResponse)
 async def analytics_page(
     request: Request,
@@ -62,8 +69,15 @@ async def analytics_page(
     # Neighborhood options for currently selected city
     neighborhoods = get_neighborhoods_for_city(db, city) if city else []
 
-    # Latest-run KPIs (last entry in trend, which is sorted ASC)
+    # Latest-run KPIs (last entry in trend, which is sorted ASC); the entry
+    # before it is the prior run, used for the period-over-period % deltas.
     latest = trend_data[-1] if trend_data else {}
+    previous = trend_data[-2] if len(trend_data) > 1 else {}
+    kpi_deltas = {
+        "median_ppsqm": _pct_delta(latest.get("median_ppsqm"), previous.get("median_ppsqm")),
+        "n_listings":   _pct_delta(latest.get("n_listings"),   previous.get("n_listings")),
+        "median_dom":   _pct_delta(latest.get("median_dom"),   previous.get("median_dom")),
+    }
 
     return templates.TemplateResponse(
         request,
@@ -74,6 +88,7 @@ async def analytics_page(
             "repeat_data":      repeat_data,
             "repeat_json":      json.dumps(repeat_data, default=str),
             "latest":           latest,
+            "kpi_deltas":       kpi_deltas,
             "filter_opts":      filter_opts,
             "geo_categories":   GEO_CATEGORIES,
             "neighborhoods":    neighborhoods,
