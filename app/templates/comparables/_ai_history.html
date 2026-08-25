@@ -13,10 +13,21 @@
     {% if item.result.income and item.result.income.available %}&nbsp;·&nbsp; вкл. доходен подход{% endif %}
   </summary>
   <div style="margin-top:0.5rem">
+    {% if item.result.failed %}
+    <div class="badge badge-warn" style="display:inline-block;margin-bottom:0.4rem">Неуспешна генерация</div>
+    <p class="hint">
+      Прекъснала е с грешка след използвани
+      {{ (item.result.input_tokens or 0) + (item.result.output_tokens or 0) }} токена
+      {% if item.result.estimated_cost_usd is not none %}(~${{ '%.4f' % item.result.estimated_cost_usd }}){% endif %}
+      — записано само за отчет на разхода, няма генериран текст.
+    </p>
+    <p class="hint" style="font-family:monospace;font-size:0.78rem">{{ item.result.error }}</p>
+    {% else %}
     {% set result = item.result %}
     {% set combined_text = item.combined_text %}
     {% set combined_income_text = item.combined_income_text %}
     {% include "comparables/_ai_generation_result.html" %}
+    {% endif %}
   </div>
 </details>
 {% endfor %}

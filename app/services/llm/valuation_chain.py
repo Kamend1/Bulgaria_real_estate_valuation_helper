@@ -13,7 +13,8 @@ Guardrails, per the plan doc:
     actually gets displayed as "suggested value" never depends on whether
     the model chose to call a tool correctly.
   - Output tokens are capped (MAX_OUTPUT_TOKENS); every run's token usage
-    and estimated cost are persisted to ai_valuation_runs.
+    and estimated cost are persisted to ai_valuation_runs -- including
+    failed runs (see the try/except around the generation loop below).
 """
 from __future__ import annotations
 
@@ -35,17 +36,30 @@ from app.services.llm.retriever import retrieve_comparables
 from app.services.llm.tools import build_tools
 
 MIN_COMPARABLES = 3
-# Bumped 2026-08-25 (Tier 6 audit): the richer prompt (property description
-# section + more detailed expert reasoning + sensitivity commentary) pushed
-# a real run to 2923 output tokens against the old 2800 cap -- confirmed
-# truncated mid-sentence in the caveats section. These caps are per-call
-# (the final narrative-generating call), not a hard cost ceiling on their
-# own -- cost is still bounded by the cheap-tier model default + rate
-# limiting on the route, not by squeezing max_tokens.
-MAX_OUTPUT_TOKENS = 2200
-# Roughly double -- generating both sales and income sections (8 headed
-# blocks instead of 4) needs more room, or output gets truncated mid-way.
-MAX_OUTPUT_TOKENS_WITH_INCOME = 4200
+# Bumped again 2026-08-25 (premium-tier audit): a real gpt-5.4-pro run came
+# back with the income section truncated mid-word and its last block
+# (income_caveats) never written at all. Root cause, confirmed directly
+# against the OpenAI Responses API: "-pro" reasoning models bill and cap
+# their hidden reasoning tokens out of the SAME max_output_tokens budget as
+# the visible completion -- a diagnostic call with this exact system prompt
+# shape and the then-current 4200 cap came back `incomplete
+# (max_output_tokens)` after spending 3354 of the 4200 tokens (80%) on
+# invisible reasoning, leaving only ~850 tokens (2471 chars) for the actual
+# 8-section markdown answer. Raised both caps across the board (not just for
+# "-pro" models) so every provider/tier has comfortable headroom -- this is
+# safe for the cheaper models too, since none of them stop early for hitting
+# a ceiling they don't need; actual spend is driven by real usage, not by
+# how high this cap is set. These caps are per-call (the final
+# narrative-generating call in the tool loop below, though a bad case can
+# still add a couple thousand tokens from earlier tool-calling turns on top
+# of this), not a hard cost ceiling on their own -- cost is still bounded by
+# the cheap-tier model default + rate limiting on the route, not by
+# squeezing max_tokens.
+MAX_OUTPUT_TOKENS = 6500
+# Roughly proportional to MAX_OUTPUT_TOKENS above -- generating both sales
+# and income sections (8 headed blocks instead of 4) needs more room even
+# before accounting for a reasoning model's hidden token spend on top.
+MAX_OUTPUT_TOKENS_WITH_INCOME = 9000
 MAX_TOOL_ITERATIONS = 5  # mandatory get_pool_stats + optional get_market_trend_stats + optional compute_income_valuation + final answer, with headroom
 
 _SYSTEM_PROMPT_BASE = """Ти подпомагаш лицензиран оценител на недвижими имоти в България, като
@@ -379,53 +393,111 @@ def generate_valuation_backbone(
     final_response: AIMessage | None = None
     income_valuation_result: dict | None = None
 
-    for _ in range(MAX_TOOL_ITERATIONS):
-        response: AIMessage = model_with_tools.invoke(messages)
-        usage = response.usage_metadata or {}
-        total_input_tokens += usage.get("input_tokens", 0)
-        total_output_tokens += usage.get("output_tokens", 0)
-        progress.tokens_so_far = total_input_tokens + total_output_tokens
-        emit()
-
-        messages.append(response)
-        if not response.tool_calls:
-            final_response = response
-            break
-
-        for call in response.tool_calls:
-            tool = tools_by_name.get(call["name"])
-            result = tool.invoke(call["args"]) if tool else {"error": f"unknown tool {call['name']}"}
-            if call["name"] == "compute_income_valuation":
-                income_valuation_result = result  # last call wins if invoked more than once
-            messages.append(ToolMessage(content=json.dumps(result, default=str, ensure_ascii=False), tool_call_id=call["id"]))
-    # else: loop exhausted without a final (non-tool-call) answer -- fall
-    # through with final_response still None; handled below.
-
-    final_text = _extract_text(final_response.content) if final_response else ""
-
-    # If the model never produced the expected section headers (loop
-    # exhausted, or it answered oddly), do one bounded, streamed follow-up
-    # with tools unbound so it can't keep calling tools -- this is also the
-    # real, token-by-token-visible generation step in the common case where
-    # the model answers directly on its first turn (no tool calls needed).
-    if "## ОБОСНОВКА" not in final_text.upper():
-        progress.step = "Генериране на текст…"
-        emit()
-        stream_messages = messages if not (messages and isinstance(messages[-1], AIMessage) and not messages[-1].tool_calls) else messages[:-1]
-        final_text = ""
-        last_chunk_usage = {}
-        for chunk in model.stream(stream_messages):
-            final_text += _extract_text(chunk.content)
-            if chunk.usage_metadata:
-                last_chunk_usage = chunk.usage_metadata
-            # Live estimate: ~4 chars/token is a rough but immediate signal;
-            # replaced by the authoritative usage_metadata total once the
-            # stream's final chunk (which carries it, for OpenAI) arrives.
-            progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(final_text) // 4, 1)
-            emit()
-        if last_chunk_usage:
+    try:
+        for _ in range(MAX_TOOL_ITERATIONS):
+            # Streamed rather than invoke()'d (2026-08-25, cost-visibility
+            # audit): a reasoning-heavy "pro"-tier call can take minutes
+            # with invoke(), during which tokens_so_far sat frozen and the
+            # SSE panel looked stuck -- no way to tell "still working" from
+            # "hung". Streaming ticks progress on every chunk instead, for
+            # every turn of the tool loop, not just the final answer.
+            chunk_accum = None
+            last_chunk_usage = {}
+            for chunk in model_with_tools.stream(messages):
+                chunk_accum = chunk if chunk_accum is None else chunk_accum + chunk
+                if chunk.usage_metadata:
+                    last_chunk_usage = chunk.usage_metadata
+                live_text = _extract_text(chunk_accum.content)
+                # Live estimate until the authoritative usage_metadata lands
+                # (~4 chars/token, replaced below once usage lands).
+                progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(live_text) // 4, 0)
+                emit()
+            response: AIMessage = chunk_accum
             total_input_tokens += last_chunk_usage.get("input_tokens", 0)
             total_output_tokens += last_chunk_usage.get("output_tokens", 0)
+            progress.tokens_so_far = total_input_tokens + total_output_tokens
+            emit()
+
+            messages.append(response)
+            if not response.tool_calls:
+                final_response = response
+                break
+
+            for call in response.tool_calls:
+                tool = tools_by_name.get(call["name"])
+                result = tool.invoke(call["args"]) if tool else {"error": f"unknown tool {call['name']}"}
+                if call["name"] == "compute_income_valuation":
+                    income_valuation_result = result  # last call wins if invoked more than once
+                messages.append(ToolMessage(content=json.dumps(result, default=str, ensure_ascii=False), tool_call_id=call["id"]))
+        # else: loop exhausted without a final (non-tool-call) answer -- fall
+        # through with final_response still None; handled below.
+
+        final_text = _extract_text(final_response.content) if final_response else ""
+
+        # If the model never produced the expected section headers (loop
+        # exhausted, or it answered oddly), do one bounded, streamed follow-up
+        # with tools unbound so it can't keep calling tools -- this is also the
+        # real, token-by-token-visible generation step in the common case where
+        # the model answers directly on its first turn (no tool calls needed).
+        if "## ОБОСНОВКА" not in final_text.upper():
+            progress.step = "Генериране на текст…"
+            emit()
+            stream_messages = messages if not (messages and isinstance(messages[-1], AIMessage) and not messages[-1].tool_calls) else messages[:-1]
+            final_text = ""
+            last_chunk_usage = {}
+            for chunk in model.stream(stream_messages):
+                final_text += _extract_text(chunk.content)
+                if chunk.usage_metadata:
+                    last_chunk_usage = chunk.usage_metadata
+                # Live estimate: ~4 chars/token is a rough but immediate signal;
+                # replaced by the authoritative usage_metadata total once the
+                # stream's final chunk (which carries it, for OpenAI) arrives.
+                progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(final_text) // 4, 1)
+                emit()
+            if last_chunk_usage:
+                total_input_tokens += last_chunk_usage.get("input_tokens", 0)
+                total_output_tokens += last_chunk_usage.get("output_tokens", 0)
+    except Exception as exc:
+        # Cost-visibility audit (2026-08-25): a failure partway through the
+        # tool-calling loop (rate limit, network error, etc.) used to lose
+        # track of whatever tokens the EARLIER, successful turns in this
+        # same loop already burned -- nothing was ever written to
+        # ai_valuation_runs unless the whole generation completed. Real
+        # money, invisible in the cost audit trail. Now logged regardless of
+        # outcome, with whatever totals had accumulated before the failure.
+        cost = estimate_cost_usd(model_id, total_input_tokens, total_output_tokens)
+        run = AiValuationRun(
+            report_id=report.id,
+            provider=provider,
+            model=model_id,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            estimated_cost_usd=cost,
+            # Mirrors the success path's result dict shape for these 4 keys
+            # (input_tokens/output_tokens/estimated_cost_usd/model) so
+            # templates reading ai_valuation_runs.output (not the separate
+            # DB columns) show the real spend for a failed run too, not a
+            # blank/undefined value.
+            output={
+                "failed": True,
+                "error": str(exc)[:2000],
+                "model": model_id,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "estimated_cost_usd": cost,
+            },
+        )
+        db.add(run)
+        db.commit()
+        progress.status = "error"
+        progress.error = (
+            f"AI генерацията прекъсна с грешка след използвани "
+            f"{total_input_tokens + total_output_tokens} токена"
+            + (f" (~${cost:.4f})" if cost is not None else "")
+            + f": {exc}"
+        )
+        emit()
+        return progress
 
     sections = _parse_sections(final_text)
 

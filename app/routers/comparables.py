@@ -283,21 +283,29 @@ def _combined_texts(r: dict) -> tuple[str, str | None]:
     persisted until the appraiser reviews it in that textarea and clicks
     its pre-existing "Запази" button themselves. Shared between a
     just-finished generation (ai_generate_result) and past runs
-    (ai_history) so both render identically."""
+    (ai_history) so both render identically.
+
+    A failed run's `output` is a minimal {"failed": True, "error": ...} dict
+    (see valuation_chain.py's cost-visibility audit, 2026-08-25) -- none of
+    the narrative keys below exist for it, so this returns empty text rather
+    than KeyError-ing; the history template shows a distinct failed-run
+    summary instead of trying to render a narrative that was never written."""
+    if r.get("failed"):
+        return "", None
     combined_text = (
-        f"{r['comparable_selection_rationale']}\n\n"
-        f"Коментар по сравними:\n{r['comparable_commentary']}\n\n"
-        f"{r['value_reasoning']}\n\n"
-        f"Ограничения: {r['caveats']}"
+        f"{r.get('comparable_selection_rationale', '')}\n\n"
+        f"Коментар по сравними:\n{r.get('comparable_commentary', '')}\n\n"
+        f"{r.get('value_reasoning', '')}\n\n"
+        f"Ограничения: {r.get('caveats', '')}"
     )
     combined_income_text = None
     income = r.get("income")
     if income and income.get("available"):
         combined_income_text = (
-            f"{income['rationale']}\n\n"
-            f"Коментар по наемни сравними:\n{income['commentary']}\n\n"
-            f"{income['reasoning']}\n\n"
-            f"Ограничения: {income['caveats']}"
+            f"{income.get('rationale', '')}\n\n"
+            f"Коментар по наемни сравними:\n{income.get('commentary', '')}\n\n"
+            f"{income.get('reasoning', '')}\n\n"
+            f"Ограничения: {income.get('caveats', '')}"
         )
     return combined_text, combined_income_text
 
