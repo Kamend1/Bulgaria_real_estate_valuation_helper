@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector/pgvector, not plain postgres -- migration 0019 (Phase 7, RAG)
+    # runs `CREATE EXTENSION vector`, which plain postgres:16 doesn't ship.
+    # Matches the image used by .github/workflows/ci.yml.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: appraiser
       POSTGRES_PASSWORD: appraiser

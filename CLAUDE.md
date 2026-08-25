@@ -82,20 +82,29 @@ LightGBM (`LGBMRegressor`) via sklearn `Pipeline` + `ColumnTransformer`. `GridSe
 
 ---
 
-## Appraisal App (Phase 1 complete)
+## Appraisal App (Phases 1-7 complete)
 
-The project is being extended into a personal real estate appraisal tool. Phase 1 foundation is in place.
+The project has grown from the Phase 1 foundation into a full multi-user appraisal
+tool: auth/roles, a segment-aware AVM (LightGBM+CatBoost, R2-backed model loading),
+GIS/cadastre integration for Sofia, a full comparables workflow (three value
+approaches + weighted conclusion + structured adjustments), Word/Excel export, and
+AI-assisted valuation via a pgvector + LangChain RAG pipeline (multi-provider:
+OpenAI/Anthropic/Google). **README.md is the up-to-date feature reference** — its
+Съдържание/table of contents covers every module in detail; don't assume this file's
+older summaries below are exhaustive, treat README.md as authoritative on scope.
 
 ### Running the app (local)
 
-Prerequisites: PostgreSQL running locally (or via Docker).
+Prerequisites: PostgreSQL 16+ with the `vector` extension (pgvector) — migration
+0019 runs `CREATE EXTENSION vector`. `docker-compose.yml`'s `db` service uses
+`pgvector/pgvector:pg16` for this reason (not plain `postgres:16`).
 
 ```
 # 1. Start DB
 docker-compose up db -d
 
 # 2. Copy env
-cp .env.example .env   # edit DATABASE_URL if needed
+cp .env.example .env   # edit DATABASE_URL if needed; OPENAI_API_KEY/etc. optional (RAG only)
 
 # 3. Install deps
 pip install -r requirements.txt
@@ -106,11 +115,18 @@ alembic upgrade head
 # 5. Import historical data (one-time, ~164K rows)
 python -m scripts.import_historical_data
 
-# 6. Start app
+# 6. Optional: embedding backfill for AI-assisted valuation (real OpenAI cost)
+python -m scripts.embed_listings
+
+# 7. Start app
 uvicorn app.main:app --reload
 ```
 
 App is at `http://localhost:8000`. Navigate to `/scrape/` to trigger a new scrape.
+On Windows, `start_app.bat` starts it on port 8891 — note it only checks whether
+something is already listening on that port and opens the browser if so, it does
+**not** detect a stale/pre-edit process and restart it; kill the old process
+manually first if you've changed code and need the new version to actually run.
 
 ### New module: `utils/feature_engineering/feature_engineering_utils.py`
 
@@ -125,28 +141,47 @@ All feature engineering extracted from notebook 03, applied to every row before 
 
 ```
 app/
-  main.py              # FastAPI app factory; mounts /static, includes routers
+  main.py              # FastAPI app factory; mounts /static, includes routers,
+                       #   CSRF + auth-attach + rate-limit middleware
   config.py            # pydantic-settings (reads .env)
   db/
     base.py            # create_engine, SessionLocal, Base
     session.py         # get_db() FastAPI dep + db_session() context manager for threads
-    models.py          # 5 ORM models: ScrapeRun, Listing, ListingSnapshot,
-                       #   AppraisalReport, ReportComparable
-  progress/
-    store.py           # ProgressStore singleton, ProgressRun, thread-safe SSE queues
+    models.py          # ORM models: ScrapeRun, Listing, ListingSnapshot,
+                       #   ListingPriceEvent, ComparablePool, ReportComparable,
+                       #   AppraisalReport, AvmModel, ListingEmbedding,
+                       #   AiValuationRun, User, UserConsent
   routers/
-    scrape.py          # GET /scrape/, POST /scrape/start, GET /scrape/progress/{id} (SSE)
+    auth.py, admin.py, scrape.py, listings.py, analytics.py,
+    comparables.py     # subject form, AVM/GIS panels, comparable pool, AI
+                       #   suggestions/generation/history, approaches, export
+    reports.py
   services/
-    scrape_service.py  # ProgressCapture, run_scrape_background, _ingest_rows_to_db
+    scrape_service.py      # ProgressCapture, run_scrape_background, _ingest_rows_to_db
+    listing_service.py     # search_listings filters (incl. construction_year/floor)
+    analytics_service.py   # mv_analytics_flat aggregation, market trend
+    avm_service.py, gis_service.py, comparable_service.py
+    llm/                    # Phase 7 RAG: providers.py (chat model factory,
+                            #   3 tiers x 3 providers), embeddings.py,
+                            #   listing_doc.py (text serialization),
+                            #   retriever.py (hybrid SQL-filter + pgvector search),
+                            #   tools.py (bound tool-calling functions),
+                            #   valuation_chain.py (generation + guardrails),
+                            #   embed_backfill.py (staleness-aware backfill,
+                            #   called both by scripts/embed_listings.py and
+                            #   automatically at the end of every scrape run)
   templates/
-    base.html          # Jinja2 base with navbar + HTMX CDN
-    scrape.html        # Scrape form (deal_types checkboxes, geo_paths, property_types)
-    scrape_progress.html  # HTMX-swapped progress panel with SSE EventSource JS
-    scrape_history.html
+    base.html          # Jinja2 base with navbar + HTMX CDN + CSRF meta tag
+    listings/           # search.html, _results.html, detail.html
+    comparables/        # panels: _avm_panel, gis panels, _pool_panel,
+                       #   _ai_suggestions_panel, _ai_generation_result,
+                       #   _ai_history, _conclusion_panel, _income_analysis, ...
 scripts/
-  import_historical_data.py   # One-time import of data/parsed_sales_runs/*/parsed_listings.parquet
+  import_historical_data.py, train_avm_model.py, embed_listings.py,
+  backup_to_r2.py, prune_old_models.py, lookup_parcel.py, create_admin.py
 alembic/
-  versions/0001_initial_schema.py   # Creates all 5 tables with indexes
+  versions/            # 0001 initial schema ... 0021 (latest) perf indexes;
+                       #   0019 adds pgvector + listing_embeddings/ai_valuation_runs
 static/app.css
 ```
 
@@ -157,8 +192,9 @@ static/app.css
 - `listing_snapshots` is append-only: every scrape adds a row even if price unchanged
 - `days_on_market` in snapshots = `scraped_at::date - published_date`
 - All monetary/area columns use `NUMERIC` not `FLOAT`
-- `geo_category` and `deal_type_normalized` ("sale"/"rent") are indexed for fast filtering
+- `geo_category` and `deal_type_normalized` ("sale"/"rent") are indexed for fast filtering; a partial composite index (`property_type_slug, geo_category, last_seen_at DESC WHERE status='active'`) backs the listings search page specifically
+- `listing_embeddings` is a separate table (not a `listings` column), keyed by `(listing_id, provider, model)` — supports re-embedding with a different model without a schema change; has an HNSW index (`vector_cosine_ops`)
 
 ### SSE scrape progress
 
-Background thread (`threading.Thread(daemon=True)`) runs the scrape. `ProgressCapture` wraps stdout and parses print lines from the existing utils with regex to extract route/listing counts. `GET /scrape/progress/{run_id}` streams SSE events to the browser's `EventSource`. Thread is NOT a FastAPI BackgroundTask (timeouts).
+Background thread (`threading.Thread(daemon=True)`) runs the scrape. `ProgressCapture` wraps stdout and parses print lines from the existing utils with regex to extract route/listing counts. `GET /scrape/progress/{run_id}` streams SSE events to the browser's `EventSource`. Thread is NOT a FastAPI BackgroundTask (timeouts). At the end of a run it also runs analytics refresh + embedding backfill (both non-fatal — a failure there logs a warning but doesn't fail the scrape).
