@@ -1,13 +1,59 @@
-{# Final rendered narrative (Phase 7, Tier 3) -- server-rendered (Jinja
+{# Final rendered narrative (Phase 7, Tier 3/6) -- server-rendered (Jinja
    auto-escapes) rather than client-side JSON templating, to avoid any XSS
-   risk from LLM-generated text ending up in innerHTML. #}
+   risk from LLM-generated text ending up in innerHTML.
+
+   Reused both for a just-finished generation (comparables.py's
+   ai_generate_result route) AND for past runs in the history panel
+   (ai_history route) -- included possibly multiple times on one page, so
+   every interactive bit below is a self-contained inline IIFE, never a
+   named global function (Tier 6 audit fix: named functions collided across
+   multiple includes, so only the LAST included run's "Insert" button
+   actually worked). #}
 {% set r = result %}
 <div class="badge badge-warn" style="display:inline-block;margin:0.5rem 0">
   Чернова — изисква преглед
 </div>
 
+{% if r.property_description %}
+<h4 style="margin-bottom:0.25rem">Описание на имота</h4>
+<p>{{ r.property_description }}</p>
+{% endif %}
+
 <h4 style="margin-bottom:0.25rem">Обосновка на избора на сравними</h4>
 <p>{{ r.comparable_selection_rationale }}</p>
+
+{% if r.comparables %}
+<div class="pool-table-wrap">
+<table class="comp-table">
+  <thead>
+    <tr>
+      <th>Местоположение</th><th>Площ<br>кв.м</th><th>Цена<br>EUR</th>
+      <th>EUR/кв.м</th><th>Строит.</th><th>Ет.</th><th>Близост</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in r.comparables %}
+    <tr>
+      <td>
+        <a href="{{ item.ad_url }}" target="_blank" class="listing-link">
+          {{ item.title_city_model or '' }}{% if item.title_geo_2_model %} · {{ item.title_geo_2_model }}{% endif %}
+        </a>
+        {% if item.location_raw %}<div class="sub-text">{{ item.location_raw | truncate(60) }}</div>{% endif %}
+      </td>
+      <td style="text-align:right">{{ '%g' % item.area_sqm_model if item.area_sqm_model else '—' }}</td>
+      <td style="text-align:right">{{ item.total_price | int if item.total_price else '—' }}</td>
+      <td style="text-align:right;font-weight:600">{{ item.price_per_sqm_model | int if item.price_per_sqm_model else '—' }}</td>
+      <td class="sub-text">{{ item.construction_type_model or '—' }}{% if item.construction_year_model %}<br>{{ item.construction_year_model }}{% endif %}</td>
+      <td class="sub-text" style="text-align:center">
+        {% if item.floor_model is not none %}{{ item.floor_model }}{% if item.total_floors_model %}/{{ item.total_floors_model }}{% endif %}{% else %}—{% endif %}
+      </td>
+      <td style="text-align:right">{{ ((1 - item.distance) * 100) | round(0) | int }}%</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
 
 <h4 style="margin-bottom:0.25rem">Коментар по сравними</h4>
 <div style="white-space:pre-line">{{ r.comparable_commentary }}</div>
@@ -15,7 +61,7 @@
 <h4 style="margin-bottom:0.25rem">Предложен диапазон стойност</h4>
 {% if r.suggested_value_range_low and r.suggested_value_range_high %}
 <p><strong>{{ r.suggested_value_range_low | int | format_number }} – {{ r.suggested_value_range_high | int | format_number }} EUR</strong>
-  <span class="hint">(изчислен от статистиката на сравнимите, не от AI текста)</span></p>
+  <span class="hint">(изчислен от статистиката на показаните по-горе сравними, не от AI текста)</span></p>
 {% else %}
 <p class="hint">Не може да се изчисли диапазон (липсва площ на обекта или ценова статистика на сравнимите).</p>
 {% endif %}
@@ -26,13 +72,11 @@
 
 <p class="hint" style="margin-top:0.5rem">
   {{ r.input_tokens }} вх. + {{ r.output_tokens }} изх. токена
-  {% if r.estimated_cost_usd is not none %}
-  &nbsp;·&nbsp; ~${{ '%.4f' % r.estimated_cost_usd }}
-  {% endif %}
+  {% if r.estimated_cost_usd is not none %}&nbsp;·&nbsp; ~${{ '%.4f' % r.estimated_cost_usd }}{% endif %}
   &nbsp;·&nbsp; {{ r.model }}
 </p>
 
-<button type="button" class="btn-primary btn-sm" onclick="insertAiNarrativeIntoReport()">
+<button type="button" class="btn-primary btn-sm ai-insert-sales-btn" data-text="{{ combined_text }}">
   Вмъкни в обосновката на съпоставимата зона
 </button>
 
@@ -47,6 +91,39 @@
 {% set v = r.income.valuation %}
 <h4 style="margin-bottom:0.25rem">Обосновка на избора на наемни сравними</h4>
 <p>{{ r.income.rationale }}</p>
+
+{% if r.income.comparables %}
+<div class="pool-table-wrap">
+<table class="comp-table">
+  <thead>
+    <tr>
+      <th>Местоположение</th><th>Площ<br>кв.м</th><th>Наем<br>EUR/мес</th>
+      <th>EUR/кв.м/мес</th><th>Строит.</th><th>Ет.</th><th>Близост</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in r.income.comparables %}
+    <tr>
+      <td>
+        <a href="{{ item.ad_url }}" target="_blank" class="listing-link">
+          {{ item.title_city_model or '' }}{% if item.title_geo_2_model %} · {{ item.title_geo_2_model }}{% endif %}
+        </a>
+        {% if item.location_raw %}<div class="sub-text">{{ item.location_raw | truncate(60) }}</div>{% endif %}
+      </td>
+      <td style="text-align:right">{{ '%g' % item.area_sqm_model if item.area_sqm_model else '—' }}</td>
+      <td style="text-align:right">{{ item.total_price | int if item.total_price else '—' }}</td>
+      <td style="text-align:right;font-weight:600">{{ item.price_per_sqm_model | float if item.price_per_sqm_model else '—' }}</td>
+      <td class="sub-text">{{ item.construction_type_model or '—' }}{% if item.construction_year_model %}<br>{{ item.construction_year_model }}{% endif %}</td>
+      <td class="sub-text" style="text-align:center">
+        {% if item.floor_model is not none %}{{ item.floor_model }}{% if item.total_floors_model %}/{{ item.total_floors_model }}{% endif %}{% else %}—{% endif %}
+      </td>
+      <td style="text-align:right">{{ ((1 - item.distance) * 100) | round(0) | int }}%</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
 
 <h4 style="margin-bottom:0.25rem">Коментар по наемни сравними</h4>
 <div style="white-space:pre-line">{{ r.income.commentary }}</div>
@@ -79,35 +156,67 @@
   {% if v.net_yield_pct is not none %}&nbsp;·&nbsp; Нетна доходност: {{ v.net_yield_pct }}%{% endif %}
   {% if v.gross_yield_pct is none %}&nbsp;·&nbsp; <span class="hint">(доходност недостъпна — AI-ят не е подал продажна цена/кв.м)</span>{% endif %}</p>
 
+{% if v.sensitivity %}
+<h4 style="margin-bottom:0.25rem">Чувствителност (директна капитализация, EUR/кв.м)</h4>
+<p class="hint" style="margin-bottom:0.3rem">Редове: Cap Rate ±20%/±10% &nbsp;·&nbsp; Колони: наем ±20%/±10%</p>
+<div class="pool-table-wrap">
+<table class="sens-table">
+  <thead>
+    <tr>
+      <th>Cap Rate ↓ / Наем →</th>
+      {% for rv in v.sensitivity.rent_variants %}<th>{{ rv }}</th>{% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in v.sensitivity.direct_value_grid_per_sqm %}
+    {% set outer_idx = loop.index0 %}
+    <tr>
+      <th>{{ v.sensitivity.cap_rate_variants_pct[outer_idx] }}%</th>
+      {% for cell in row %}
+      <td style="text-align:right{% if loop.index0 == 2 and outer_idx == 2 %};outline:2px solid var(--brand);outline-offset:-2px{% endif %}">{{ cell | int | format_number }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
 <h4 style="margin-bottom:0.25rem">Разсъждение</h4>
 <p>{{ r.income.reasoning }}</p>
 
 <h4 style="margin-bottom:0.25rem">Ограничения (доходен подход)</h4>
 <p>{{ r.income.caveats }}</p>
 
-<button type="button" class="btn-primary btn-sm" onclick="insertIncomeNarrativeIntoReport()">
+<button type="button" class="btn-primary btn-sm ai-insert-income-btn" data-text="{{ combined_income_text }}">
   Вмъкни в обосновката на доходния подход
 </button>
 {% endif %}
 {% endif %}
 
 <script>
-function insertAiNarrativeIntoReport() {
-  var ta = document.querySelector('textarea[name="submarket_rationale"]');
-  if (!ta) return;
-  ta.value = {{ combined_text | tojson }};
-  var details = ta.closest('details');
-  if (details) details.open = true;
-  ta.scrollIntoView({behavior: 'smooth', block: 'center'});
-}
-{% if combined_income_text %}
-function insertIncomeNarrativeIntoReport() {
-  var ta = document.querySelector('textarea[name="income_market_rationale"]');
-  if (!ta) return;
-  ta.value = {{ combined_income_text | tojson }};
-  var details = ta.closest('details');
-  if (details) details.open = true;
-  ta.scrollIntoView({behavior: 'smooth', block: 'center'});
-}
-{% endif %}
+(function () {
+  // Delegated, idempotent wiring -- safe even when this template is
+  // included multiple times on one page (history panel: one copy per past
+  // run). Each button carries its own payload in data-text (escaped by
+  // Jinja's normal HTML-attribute autoescaping, not tojson -- tojson's
+  // literal quotes would break out of a double-quoted attribute; see Tier
+  // 6 audit fix, 2026-08-25).
+  function wire(selector, targetName) {
+    document.querySelectorAll(selector).forEach(function (btn) {
+      if (btn._aiInsertWired) return;
+      btn._aiInsertWired = true;
+      btn.addEventListener('click', function () {
+        var ta = document.querySelector('textarea[name="' + targetName + '"]');
+        if (!ta) return;
+        ta.value = btn.dataset.text || '';
+        var d = ta.closest('details');
+        if (d) d.open = true;
+        ta.scrollIntoView({behavior: 'smooth', block: 'center'});
+      });
+    });
+  }
+  wire('.ai-insert-sales-btn', 'submarket_rationale');
+  wire('.ai-insert-income-btn', 'income_market_rationale');
+})();
 </script>

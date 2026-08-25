@@ -96,4 +96,16 @@
   </button>
 </form>
 <div id="ai-generation-slot"></div>
+
+<details style="margin-top:0.75rem">
+  <summary class="hint" style="cursor:pointer">История на AI генерации за този доклад</summary>
+  <div id="ai-history-content"
+       hx-get="/comparables/ai-history"
+       hx-trigger="toggle once from:closest details"
+       hx-target="this"
+       hx-swap="innerHTML"
+       style="margin-top:0.5rem">
+    <p class="hint">Зареждане…</p>
+  </div>
+</details>
 {% endif %}

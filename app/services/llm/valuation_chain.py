@@ -35,27 +35,48 @@ from app.services.llm.retriever import retrieve_comparables
 from app.services.llm.tools import build_tools
 
 MIN_COMPARABLES = 3
-MAX_OUTPUT_TOKENS = 1500
+# Bumped 2026-08-25 (Tier 6 audit): the richer prompt (property description
+# section + more detailed expert reasoning + sensitivity commentary) pushed
+# a real run to 2923 output tokens against the old 2800 cap -- confirmed
+# truncated mid-sentence in the caveats section. These caps are per-call
+# (the final narrative-generating call), not a hard cost ceiling on their
+# own -- cost is still bounded by the cheap-tier model default + rate
+# limiting on the route, not by squeezing max_tokens.
+MAX_OUTPUT_TOKENS = 2200
 # Roughly double -- generating both sales and income sections (8 headed
 # blocks instead of 4) needs more room, or output gets truncated mid-way.
-MAX_OUTPUT_TOKENS_WITH_INCOME = 2800
-MAX_TOOL_ITERATIONS = 4  # one extra vs sales-only, to allow a compute_income_valuation call too
+MAX_OUTPUT_TOKENS_WITH_INCOME = 4200
+MAX_TOOL_ITERATIONS = 5  # mandatory get_pool_stats + optional get_market_trend_stats + optional compute_income_valuation + final answer, with headroom
 
-_SYSTEM_PROMPT_BASE = """Ти си асистент на лицензиран оценител на недвижими имоти в България.
-Твоята задача е да напишеш ЧЕРНОВА за оценяван имот, която ЩЕ БЪДЕ прегледана и
-редактирана от лицензиран оценител преди да влезе в доклад.
+_SYSTEM_PROMPT_BASE = """Ти подпомагаш лицензиран оценител на недвижими имоти в България, като
+извършваш експертен анализ на пазарни данни за оценяван имот. Пиши със самочувствието на
+оценител, който познава пазара -- конкретни, обосновани твърдения, не общи приказки.
+Резултатът е ЧЕРНОВА, която ЩЕ БЪДЕ прегледана и редактирана от лицензирания оценител
+преди да влезе в доклад -- но твоята роля в тази чернова е да разсъждаваш като експерт,
+не да се въздържаш от анализ.
 
 СТРОГИ ПРАВИЛА:
-- Ползвай САМО данните, предоставени в съобщението на потребителя -- никога не измисляй
-  адреси, цени или характеристики извън предоставените.
+- Ползвай САМО данните, предоставени в съобщението на потребителя и върнати от
+  инструментите -- никога не измисляй адреси, цени или характеристики извън предоставените.
+- Винаги извиквай get_pool_stats(comparable_type="sale") в началото -- това е ръчно
+  потвърденият от оценителя пул сравними (ако има такъв) за същия доклад. Сравни го с
+  AI-извлечените сравними по-долу и коментирай изрично в РАЗСЪЖДЕНИЕ, ако се разминават
+  съществено -- това е важна проверка за достоверност, не по избор.
 - За допълнителен пазарен контекст можеш да извикаш get_market_trend_stats -- никога не
   смятай пазарни агрегати наум.
 - Крайният диапазон на стойността по пазарен подход НЕ Е твоя задача -- изчислен е отделно
-  и ще бъде показан отделно, извън твоя текст.
+  и ще бъде показан отделно, извън твоя текст. Твоята задача в РАЗСЪЖДЕНИЕ е да обосновеш
+  КЪДЕ в наблюдавания диапазон обектът вероятно се позиционира и защо -- не да изричаш
+  конкретна цифра.
 - Отговори СТРОГО в зададения по-долу markdown формат, точно тези заглавия, без
   допълнителен текст извън тях, и без да измисляш нови заглавия."""
 
 _SALES_PROMPT_SECTIONS = """
+## ОПИСАНИЕ НА ИМОТА
+(кратко, конкретно описание на оценявания имот -- обедини структурираните данни за обекта
+с предоставеното от оценителя свободно описание по-долу, ако има такова; пиши все едно
+представяш имота в началото на доклад, не просто изреждаш полетата)
+
 ## ОБОСНОВКА
 (защо предоставените сравними са подходящи за обекта)
 
@@ -64,7 +85,11 @@ _SALES_PROMPT_SECTIONS = """
 (по един ред на всяко сравнимо, точно колкото са предоставени)
 
 ## РАЗСЪЖДЕНИЕ
-(как наблюденията по-горе биха повлияли на стойността, без да изричаш конкретно число)
+(експертен мост от конкретните характеристики на обекта -- площ, етаж, строителство,
+състояние по описанието -- към позицията му спрямо диапазона на сравнимите: горна,
+долна или средна част от наблюдаваните цени на кв.м, и защо точно там; включи и
+сравнение с get_pool_stats резултата, ако е поискано по-горе; без да изричаш
+конкретно число за крайната стойност)
 
 ## ОГРАНИЧЕНИЯ
 (допускания, ограничения на извадката, какво оценителят трябва да провери допълнително)"""
@@ -76,13 +101,14 @@ _INCOME_PROMPT_SECTIONS = """
 (за да се изчислят доходностите -- пропускането на sale_price_per_sqm е позволено, но
 означава че gross_yield_pct/net_yield_pct няма да могат да бъдат изчислени, затова
 включвай го винаги, когато имаш продажна статистика). Може да отклониш параметрите на
-допусканията (cap
-rate, незаетост, разходи, ръст, хоризонт, терминален cap rate) от подразбиращите се
-стойности в рамките на позволените граници (виж описанието на инструмента), но ВСЯКО
-отклонение от подразбиращата се стойност ТРЯБВА да бъде обяснено в ДОХОДЕН РАЗСЪЖДЕНИЕ
-по-долу -- кой параметър си променил и защо. Числовите резултати (NOI, доходност, стойност
-по капитализация, DCF) НЕ СА твоя задача да пишеш -- инструментът ги връща и ще бъдат
-показани отделно.
+допусканията (cap rate, незаетост, разходи, ръст, хоризонт, терминален cap rate) от
+подразбиращите се стойности в рамките на позволените граници (виж описанието на
+инструмента), но ВСЯКО отклонение от подразбиращата се стойност ТРЯБВА да бъде обяснено
+в ДОХОДЕН РАЗСЪЖДЕНИЕ по-долу -- кой параметър си променил и защо. Инструментът връща и
+sensitivity -- таблица на стойността при вариране на cap rate и наем -- коментирай какво
+показва тя за чувствителността на извода (напр. колко силно влияе избраната cap rate).
+Числовите резултати (NOI, доходност, стойност по капитализация, DCF, sensitivity) НЕ СА
+твоя задача да пишеш -- инструментът ги връща и ще бъдат показани отделно.
 
 ## ДОХОДЕН ОБОСНОВКА
 (защо предоставените наемни сравними са подходящи за обекта)
@@ -92,12 +118,14 @@ rate, незаетост, разходи, ръст, хоризонт, терми
 (по един ред на всяко наемно сравнимо)
 
 ## ДОХОДЕН РАЗСЪЖДЕНИЕ
-(избраните допускания и защо, особено ако се различават от подразбиращите се стойности)
+(избраните допускания и защо, особено ако се различават от подразбиращите се стойности;
+коментар върху sensitivity резултата -- доколко изводът зависи от избраната cap rate/наем)
 
 ## ДОХОДНИ ОГРАНИЧЕНИЯ
 (допускания и ограничения специфични за доходния подход)"""
 
 _SECTION_KEYS = {
+    "ОПИСАНИЕ НА ИМОТА": "property_description",
     "ОБОСНОВКА": "comparable_selection_rationale",
     "КОМЕНТАР ПО СРАВНИМИ": "comparable_commentary",
     "РАЗСЪЖДЕНИЕ": "value_reasoning",
@@ -188,21 +216,24 @@ def _parse_sections(text: str) -> dict:
     return sections
 
 
-def _compute_value_range(pool_stats: dict | None, comps: list[dict], subject_area) -> tuple[float | None, float | None]:
-    """Deterministic -- never left to the model. Prefers the manual
-    comparable pool's stats (appraiser-curated); falls back to the
-    AI-retrieved comparables' own p25/p75 if the pool is empty."""
-    if pool_stats:
-        p25, p75 = float(pool_stats["p25"]), float(pool_stats["p75"])
+def _compute_value_range(comps: list[dict], subject_area) -> tuple[float | None, float | None]:
+    """Deterministic -- never left to the model. Always derived from the
+    SAME AI-retrieved comparables the narrative discusses (comps, not the
+    manual pool) -- audit finding 2026-08-25: an earlier version preferred
+    the manual pool's stats when non-empty, which silently produced a
+    number computed from a DIFFERENT set than the one being narrated
+    (confusing when a manual pool already existed, which is the common
+    case). The manual pool is still surfaced to the model as an explicit
+    cross-reference via the now-mandatory get_pool_stats tool call, not by
+    quietly swapping which set the headline number comes from."""
+    ppsqms = sorted(float(c["price_per_sqm_model"]) for c in comps if c.get("price_per_sqm_model"))
+    if not ppsqms:
+        return None, None
+    if len(ppsqms) >= 4:
+        q = statistics.quantiles(ppsqms, n=4)
+        p25, p75 = q[0], q[2]
     else:
-        ppsqms = sorted(float(c["price_per_sqm_model"]) for c in comps if c.get("price_per_sqm_model"))
-        if not ppsqms:
-            return None, None
-        if len(ppsqms) >= 4:
-            q = statistics.quantiles(ppsqms, n=4)
-            p25, p75 = q[0], q[2]
-        else:
-            p25, p75 = ppsqms[0], ppsqms[-1]
+        p25, p75 = ppsqms[0], ppsqms[-1]
 
     if not subject_area:
         return None, None
@@ -260,7 +291,7 @@ def generate_valuation_backbone(
     emit()
     pool = get_pool_with_stats(db, "sale", report.id)
     pool_stats = pool["stats"]
-    value_low, value_high = _compute_value_range(pool_stats, comps, report.subject_area_sqm)
+    value_low, value_high = _compute_value_range(comps, report.subject_area_sqm)
 
     # Income approach: independent guardrail -- insufficient rent comps
     # degrades this section gracefully rather than failing the whole
@@ -305,6 +336,11 @@ def generate_valuation_backbone(
         f"Етаж: {report.subject_floor if report.subject_floor is not None else '—'}"
         + (f"/{report.subject_total_floors}" if report.subject_total_floors else "")
     )
+    # Audit finding 2026-08-25: this free-text field existed on the report
+    # but was never shown to the model -- the AI could not meaningfully
+    # "describe the property" beyond the bare structured fields without it.
+    if report.subject_description:
+        subject_desc += f"\nСвободно описание от оценителя: {report.subject_description}"
     pool_desc = (
         f"Ръчният пул сравними съдържа {pool_stats['n']} обяви, медиана {pool_stats['median']} EUR/кв.м."
         if pool_stats else
@@ -414,6 +450,7 @@ def generate_valuation_backbone(
             }
 
     result = _json_safe({
+        "property_description": sections["property_description"],
         "comparable_selection_rationale": sections["comparable_selection_rationale"],
         "comparable_commentary": sections["comparable_commentary"],
         "value_reasoning": sections["value_reasoning"],

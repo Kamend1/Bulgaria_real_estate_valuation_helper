@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import AppraisalReport, ComparablePool, User
+from app.db.models import AiValuationRun, AppraisalReport, ComparablePool, User
 from app.db.session import db_session, get_db
 from app.dependencies import require_auth as get_current_user
 from app.rate_limit import limiter
@@ -276,18 +276,14 @@ async def ai_generate_progress_sse(run_id: str) -> StreamingResponse:
     )
 
 
-@router.get("/ai-generate/result/{run_id}", response_class=HTMLResponse)
-async def ai_generate_result(request: Request, run_id: str):
-    progress = generation_store.get(run_id)
-    if progress is None or progress.status != "done":
-        return HTMLResponse('<p class="hint">Резултатът вече не е наличен.</p>')
-
-    r = progress.result
-    # Combined text for the "insert into report" action -- targets the
-    # EXISTING submarket_rationale textarea/save-form already on the page
-    # (see comparables.html) rather than a new backend route: this way
-    # nothing is persisted until the appraiser reviews it in that textarea
-    # and clicks its pre-existing "Запази" button themselves.
+def _combined_texts(r: dict) -> tuple[str, str | None]:
+    """Text for the "insert into report" actions -- target the EXISTING
+    submarket_rationale/income_market_rationale textareas/save-forms
+    already on the page rather than a new backend route: nothing is
+    persisted until the appraiser reviews it in that textarea and clicks
+    its pre-existing "Запази" button themselves. Shared between a
+    just-finished generation (ai_generate_result) and past runs
+    (ai_history) so both render identically."""
     combined_text = (
         f"{r['comparable_selection_rationale']}\n\n"
         f"Коментар по сравними:\n{r['comparable_commentary']}\n\n"
@@ -303,10 +299,54 @@ async def ai_generate_result(request: Request, run_id: str):
             f"{income['reasoning']}\n\n"
             f"Ограничения: {income['caveats']}"
         )
+    return combined_text, combined_income_text
+
+
+@router.get("/ai-generate/result/{run_id}", response_class=HTMLResponse)
+async def ai_generate_result(request: Request, run_id: str):
+    progress = generation_store.get(run_id)
+    if progress is None or progress.status != "done":
+        return HTMLResponse('<p class="hint">Резултатът вече не е наличен.</p>')
+
+    r = progress.result
+    combined_text, combined_income_text = _combined_texts(r)
     return templates.TemplateResponse(
         request, "comparables/_ai_generation_result.html",
         {"result": r, "combined_text": combined_text, "combined_income_text": combined_income_text},
     )
+
+
+@router.get("/ai-history", response_class=HTMLResponse)
+@limiter.limit("30/hour")
+async def ai_history(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Persisted past AI generations for the active report (Tier 6 audit
+    fix, 2026-08-25): ai_valuation_runs.output already held the full
+    narrative, but nothing ever read it back -- once the ephemeral
+    generation_store entry aged out or the appraiser navigated away without
+    clicking "Insert", the generated text was effectively gone even though
+    it was sitting in the DB. Lazy-loaded like the suggestions panel (no
+    reason to query on every page view)."""
+    report = _active_report(request, db, user)
+    runs = (
+        db.query(AiValuationRun)
+        .filter(AiValuationRun.report_id == report.id)
+        .order_by(AiValuationRun.created_at.desc())
+        .all()
+    )
+    items = []
+    for run in runs:
+        r = run.output or {}
+        combined_text, combined_income_text = _combined_texts(r)
+        items.append({
+            "id": str(run.id), "created_at": run.created_at,
+            "provider": run.provider, "model": run.model,
+            "result": r, "combined_text": combined_text, "combined_income_text": combined_income_text,
+        })
+    return templates.TemplateResponse(request, "comparables/_ai_history.html", {"items": items})
 
 
 # ── Pool mutations ────────────────────────────────────────────────────────────

@@ -107,7 +107,11 @@ def _income_valuation_description() -> str:
         f"  terminal_cap_rate_pct: {b['terminal_cap_rate_pct'][0]}-{b['terminal_cap_rate_pct'][1]} (default {d['terminal_cap_rate_pct']})\n\n"
         "Returns gross_yield_pct, net_yield_pct, noi_per_sqm_year, "
         "direct_value_per_sqm, dcf_value_per_sqm, dcf_rows (year-by-year), "
-        "terminal_value_pv_per_sqm -- all computed here, not by you."
+        "terminal_value_pv_per_sqm, and sensitivity (a 5x5 grid of "
+        "direct-capitalization value at cap_rate x rent variants, ±10%/±20% "
+        "around the values you passed) -- all computed here, not by you. "
+        "Comment on what the sensitivity grid implies (e.g. how much the "
+        "value swings with cap rate) in your reasoning section."
     )
 
 

@@ -1026,6 +1026,22 @@ def compute_income_valuation(
     pv_tv = tv_undiscounted / ((1 + r) ** int(period_years))
     dcf_value = pv + pv_tv
 
+    # Sensitivity grid (direct-capitalization value at cap_rate x rent
+    # variants, ±10%/±20% around the values actually used above) -- ported
+    # from _income_analysis.html's JS sensitivity table (Phase 7, Tier 6
+    # audit finding: this existed as client-side-only JS the AI had no
+    # access to and therefore could never comment on). Simplified to vary
+    # around the tool's own base rent/cap_rate rather than pool quartiles,
+    # so it stays self-contained in this one function call.
+    variants = (-0.2, -0.1, 0.0, 0.1, 0.2)
+    rent_variants = [round(rent_per_sqm_month * (1 + v), 2) for v in variants]
+    cap_rate_variants_pct = [round(max(0.1, cap_rate_pct * (1 + v)), 2) for v in variants]
+    sensitivity_grid = []
+    for cr_pct in cap_rate_variants_pct:
+        cr = cr_pct / 100
+        row = [round((rv * 12 * effective_pct) / cr, 2) if cr > 0 else None for rv in rent_variants]
+        sensitivity_grid.append(row)
+
     return {
         "gross_yield_pct": round(gross_yield_pct, 2) if gross_yield_pct is not None else None,
         "net_yield_pct": round(net_yield_pct, 2) if net_yield_pct is not None else None,
@@ -1035,6 +1051,12 @@ def compute_income_valuation(
         "dcf_rows": rows,
         "terminal_value_pv_per_sqm": round(pv_tv, 2),
         "terminal_value_undiscounted_per_sqm": round(tv_undiscounted, 2),
+        "sensitivity": {
+            "cap_rate_variants_pct": cap_rate_variants_pct,
+            "rent_variants": rent_variants,
+            # grid[i][j] = direct-capitalization value at cap_rate_variants_pct[i], rent_variants[j]
+            "direct_value_grid_per_sqm": sensitivity_grid,
+        },
     }
 
 

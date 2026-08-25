@@ -1,0 +1,23 @@
+{# Past AI valuation runs for the active report (Phase 7, Tier 6 audit fix)
+   -- reuses _ai_generation_result.html per run, safe to include many times
+   (see that template's own note on why the insert buttons are collision-safe). #}
+{% if not items %}
+<p class="hint">Все още няма генерирани AI анализи за този доклад.</p>
+{% else %}
+{% for item in items %}
+<details style="margin-bottom:0.6rem;border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem" {% if loop.first %}open{% endif %}>
+  <summary class="hint" style="cursor:pointer">
+    {{ item.created_at.strftime('%d.%m.%Y %H:%M') if item.created_at else '—' }}
+    &nbsp;·&nbsp; {{ item.provider }}/{{ item.model }}
+    {% if item.result.estimated_cost_usd is not none %}&nbsp;·&nbsp; ~${{ '%.4f' % item.result.estimated_cost_usd }}{% endif %}
+    {% if item.result.income and item.result.income.available %}&nbsp;·&nbsp; вкл. доходен подход{% endif %}
+  </summary>
+  <div style="margin-top:0.5rem">
+    {% set result = item.result %}
+    {% set combined_text = item.combined_text %}
+    {% set combined_income_text = item.combined_income_text %}
+    {% include "comparables/_ai_generation_result.html" %}
+  </div>
+</details>
+{% endfor %}
+{% endif %}
