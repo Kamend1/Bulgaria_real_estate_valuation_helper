@@ -1,0 +1,93 @@
+{# Full message history for the active conversation (Tier 2, 2026-08-26).
+   Re-rendered wholesale after each turn -- simplest correct approach for a
+   first version rather than hand-rolled incremental DOM patching. #}
+{% if not messages %}
+<p class="hint">Все още няма съобщения. Попитай нещо за оценявания имот, сравнимите или доходния подход.</p>
+{% endif %}
+{% for msg in messages %}
+  {% if msg.role == "user" %}
+  <div class="chat-msg chat-msg-user">
+    <div class="chat-bubble">{{ msg.content }}</div>
+  </div>
+
+  {% elif msg.role == "assistant" and msg.content %}
+  <div class="chat-msg chat-msg-assistant">
+    <div class="chat-bubble" style="white-space:pre-line">{{ msg.content }}</div>
+  </div>
+
+  {% elif msg.role == "assistant" and msg.tool_calls %}
+  <div class="chat-msg chat-msg-tool-call">
+    <span class="hint">🔧 {{ msg.tool_calls | map(attribute='name') | join(', ') }}</span>
+  </div>
+
+  {% elif msg.role == "tool" and msg.parsed and msg.parsed.proposed %}
+  <div class="chat-msg chat-msg-proposal">
+    <div class="proposal-card">
+      <div class="hint" style="margin-bottom:0.3rem">Предложение: {{ msg.parsed.field_label }}</div>
+      <div class="chat-bubble" style="white-space:pre-line">{{ msg.parsed.text }}</div>
+      <form hx-post="/assistant/apply-proposal" hx-target="closest .proposal-card" hx-swap="beforeend"
+            style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem">
+        <input type="hidden" name="field" value="{{ msg.parsed.field }}">
+        <input type="hidden" name="text" value="{{ msg.parsed.text }}">
+        <button type="submit" class="btn-primary btn-sm">Приложи в доклада</button>
+      </form>
+    </div>
+  </div>
+
+  {% elif msg.role == "tool" and msg.parsed and msg.parsed.overall_assessment is defined %}
+  <div class="chat-msg chat-msg-proposal">
+    <div class="proposal-card" style="background:#eff6ff;border-color:#bfdbfe">
+      <div class="hint" style="margin-bottom:0.3rem">🔎 Критичен преглед (отделен анализ)</div>
+      <p style="margin:0 0 0.4rem"><strong>{{ msg.parsed.overall_assessment }}</strong></p>
+      {% if msg.parsed.consistency_issues %}
+      <p class="hint" style="margin-bottom:0.15rem">Несъответствия:</p>
+      <ul style="margin:0 0 0.4rem 1.1rem;padding:0">
+        {% for issue in msg.parsed.consistency_issues %}<li>{{ issue }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if msg.parsed.avm_commentary %}
+      <p style="margin:0 0 0.4rem"><strong>AVM:</strong> {{ msg.parsed.avm_commentary }}</p>
+      {% endif %}
+      {% if msg.parsed.missing_caveats %}
+      <p class="hint" style="margin-bottom:0.15rem">Липсващи ограничения:</p>
+      <ul style="margin:0;padding:0 0 0 1.1rem">
+        {% for c in msg.parsed.missing_caveats %}<li>{{ c }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+
+  {% elif msg.role == "tool" and msg.parsed %}
+  <div class="chat-msg chat-msg-tool-result">
+    <details>
+      <summary class="hint" style="cursor:pointer">🔧 резултат от инструмент</summary>
+      <pre style="white-space:pre-wrap;font-size:0.8rem;margin-top:0.3rem">{{ msg.parsed | pprint }}</pre>
+    </details>
+  </div>
+  {% endif %}
+{% endfor %}
+
+{% if calls %}
+<p class="hint" style="margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.5rem">
+  Общо в разговора: {{ total_tokens }} токена
+  {% if total_cost %}&nbsp;·&nbsp; ~${{ '%.4f' % total_cost }}{% endif %}
+  &nbsp;·&nbsp; <a href="#" onclick="document.getElementById('chat-call-log').style.display='block';this.style.display='none';return false">детайлна разбивка</a>
+</p>
+<div id="chat-call-log" style="display:none;margin-top:0.4rem">
+  <div class="pool-table-wrap">
+  <table class="comp-table">
+    <thead><tr><th>Стъпка</th><th style="text-align:right">Вх.</th><th style="text-align:right">Изх.</th><th style="text-align:right">Цена</th></tr></thead>
+    <tbody>
+      {% for call in calls %}
+      <tr>
+        <td class="sub-text">{{ call.call_label }}</td>
+        <td style="text-align:right">{{ call.input_tokens }}</td>
+        <td style="text-align:right">{{ call.output_tokens }}</td>
+        <td style="text-align:right">{% if call.estimated_cost_usd is not none %}${{ '%.6f' % call.estimated_cost_usd }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}

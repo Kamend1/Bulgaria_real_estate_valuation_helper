@@ -1,0 +1,28 @@
+{# Document list + upload for the active report (Tier 3, 2026-08-26). #}
+<div id="doc-list">
+  {% if not docs %}
+  <p class="hint">Все още няма качени документи.</p>
+  {% endif %}
+  {% for doc in docs %}
+    {% include "assistant/_document_item.html" %}
+  {% endfor %}
+</div>
+
+<form hx-post="/assistant/documents/upload" hx-target="#doc-list" hx-swap="afterbegin"
+      hx-encoding="multipart/form-data"
+      hx-on::after-request="this.reset()"
+      style="display:flex;gap:0.5rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap">
+  <select name="document_type" class="income-label" title="Тип документ" style="padding:0.3rem" required>
+    {% for type_key, type_label in document_type_labels.items() %}
+    <option value="{{ type_key }}">{{ type_label }}</option>
+    {% endfor %}
+  </select>
+  <input type="file" name="file" title="Файл за качване" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" required style="max-width:220px">
+  <button type="submit" class="btn-primary btn-sm">
+    Качи
+    <span class="htmx-indicator">…</span>
+  </button>
+</form>
+<p class="hint" style="margin-top:0.3rem">
+  PDF/DOCX/TXT/снимка, до 15 MB. Обработката (извличане на текст/данни) отнема няколко секунди.
+</p>

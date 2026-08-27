@@ -1,0 +1,49 @@
+{# Shown immediately in #chat-messages after POST /assistant/send, while the
+   background thread runs (Tier 2, 2026-08-26) -- mirrors comparables'
+   _ai_generation_progress.html's EventSource pattern, generalized to a
+   chat turn instead of a one-shot generation. #}
+<div class="chat-msg chat-msg-user">
+  <div class="chat-bubble">{{ user_message }}</div>
+</div>
+<div class="chat-msg chat-msg-assistant" id="chat-turn-{{ turn_id }}">
+  <div class="chat-bubble chat-bubble-pending">
+    <span id="chat-turn-step-{{ turn_id }}">Стартиране…</span>
+    &nbsp;·&nbsp; <span class="hint">токени: <strong id="chat-turn-tokens-{{ turn_id }}">0</strong></span>
+  </div>
+</div>
+
+<script>
+(function () {
+  var turnId = {{ turn_id | tojson }};
+  var es = new EventSource('/assistant/progress/' + turnId);
+
+  es.addEventListener('progress', function (e) {
+    var data = JSON.parse(e.data);
+    var stepEl = document.getElementById('chat-turn-step-' + turnId);
+    var tokEl = document.getElementById('chat-turn-tokens-' + turnId);
+    if (stepEl) stepEl.textContent = data.step || '';
+    if (tokEl) tokEl.textContent = data.tokens_so_far || 0;
+  });
+
+  es.addEventListener('done', function (e) {
+    var data = JSON.parse(e.data);
+    es.close();
+    if (data.status === 'done') {
+      htmx.ajax('GET', '/assistant/messages', { target: '#chat-messages', swap: 'innerHTML' })
+        .then(function () {
+          var box = document.getElementById('chat-messages');
+          if (box) box.scrollTop = box.scrollHeight;
+        });
+    } else {
+      var turnEl = document.getElementById('chat-turn-' + turnId);
+      if (turnEl) turnEl.querySelector('.chat-bubble').textContent = data.error || 'Грешка.';
+    }
+  });
+
+  es.onerror = function () {
+    var turnEl = document.getElementById('chat-turn-' + turnId);
+    if (turnEl) turnEl.querySelector('.chat-bubble').textContent = 'Връзката е прекъсната.';
+    es.close();
+  };
+})();
+</script>

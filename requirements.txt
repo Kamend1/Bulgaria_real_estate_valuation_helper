@@ -31,6 +31,17 @@ itsdangerous==2.2.0
 python-docx==1.1.2
 openpyxl==3.1.5
 
+# ── Document upload/extraction (Tier 3, multi-agent chat, 2026-08-26) ───────────
+# PyMuPDF: native PDF text extraction (app/services/documents.py) + rendering
+# PDF pages to images for the vision-OCR fallback when a PDF has no text
+# layer (scanned notarial acts) or for a scanned/photographed скица. Pillow:
+# only needed for image format handling around that render step. Both were
+# already present locally as transitive deps of something else -- pinned
+# explicitly now that app code imports them directly (same reasoning as
+# httpx in the "local" LLM provider addition).
+pymupdf==1.27.2.2
+pillow==12.1.1
+
 # ── Scraping ──────────────────────────────────────────────────────────────────
 requests==2.32.5
 beautifulsoup4==4.14.3
@@ -81,3 +92,18 @@ langchain-openai==1.6.0
 langchain-anthropic==1.6.1
 langchain-google-genai==4.3.5
 pgvector==0.5.0
+# langgraph: deliberately AVOIDED earlier in this phase (see providers.py's
+# own docstring -- init_chat_model pulls it in just for one dispatch
+# function, not worth the weight). Added now (Tier 4, 2026-08-26) once
+# there was a genuine multi-step orchestration need it actually earns its
+# place for: the critic graph (app/services/llm/critic_graph.py) has real
+# separable nodes (gather report context -> run the critique LLM call),
+# not a single linear function call dressed up as a graph.
+langgraph==1.2.11
+# httpx: only new dependency for local-model support (LM Studio/Ollama/vLLM,
+# 2026-08-25) -- no langchain-ollama needed, those servers all speak the
+# OpenAI Chat Completions API so the existing ChatOpenAI/OpenAIEmbeddings
+# classes work unmodified against a local base_url (providers.py). httpx is
+# already pulled in transitively by the openai SDK; pinned explicitly here
+# since app code now imports it directly (providers.list_local_models).
+httpx==0.28.1

@@ -919,6 +919,21 @@ def new_draft(db: Session, user_id: int) -> AppraisalReport:
     return _new_draft_obj(db, user_id)
 
 
+def get_draft_reports_for_user(db: Session, user_id: int) -> list[AppraisalReport]:
+    """For the quick project-switcher on /comparables/ and /assistant/
+    (2026-08-26) -- only the user's non-finalized reports, since "which
+    draft am I working on" is the whole ask (finalized/exported reports are
+    browsed from /reports/ instead). Lighter than get_user_reports (which
+    joins comparable_pool for the full /reports/ table's sale/rent/pinned
+    counts) -- the switcher only needs id + a label."""
+    return (
+        db.query(AppraisalReport)
+        .filter(AppraisalReport.user_id == user_id, AppraisalReport.status == "draft")
+        .order_by(AppraisalReport.updated_at.desc())
+        .all()
+    )
+
+
 def _new_draft_obj(db: Session, user_id: int) -> AppraisalReport:
     draft = AppraisalReport(title="Нов доклад", status="draft", user_id=user_id)
     db.add(draft)

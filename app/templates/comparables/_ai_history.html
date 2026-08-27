@@ -28,6 +28,31 @@
     {% set combined_income_text = item.combined_income_text %}
     {% include "comparables/_ai_generation_result.html" %}
     {% endif %}
+
+    {% if item.calls %}
+    <details style="margin-top:0.6rem">
+      <summary class="hint" style="cursor:pointer">
+        Детайлна разбивка на токените ({{ item.calls|length }} извиквания)
+      </summary>
+      <div class="pool-table-wrap" style="margin-top:0.4rem">
+      <table class="comp-table">
+        <thead>
+          <tr><th>Стъпка</th><th style="text-align:right">Вх. токени</th><th style="text-align:right">Изх. токени</th><th style="text-align:right">Цена</th></tr>
+        </thead>
+        <tbody>
+          {% for call in item.calls %}
+          <tr>
+            <td class="sub-text">{{ call.call_label }}</td>
+            <td style="text-align:right">{{ call.input_tokens }}</td>
+            <td style="text-align:right">{{ call.output_tokens }}</td>
+            <td style="text-align:right">{% if call.estimated_cost_usd is not none %}${{ '%.6f' % call.estimated_cost_usd }}{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </details>
+    {% endif %}
   </div>
 </details>
 {% endfor %}

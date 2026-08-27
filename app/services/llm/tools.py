@@ -9,7 +9,7 @@ from __future__ import annotations
 from langchain_core.tools import StructuredTool
 from sqlalchemy.orm import Session
 
-from app.db.models import AppraisalReport
+from app.db.models import AgentLlmCall, AppraisalReport, ReportDocument
 from app.services import analytics_service
 from app.services.comparable_service import (
     INCOME_ASSUMPTION_BOUNDS,
@@ -18,6 +18,9 @@ from app.services.comparable_service import (
     compute_weighted_conclusion,
     get_pool_with_stats,
 )
+from app.services.llm import critic_graph
+from app.services.llm.providers import estimate_cost_usd
+from app.services.llm.retriever import retrieve_comparables
 
 
 def _pool_stats_fn(db: Session, report: AppraisalReport):
@@ -160,3 +163,172 @@ def build_tools(db: Session, report: AppraisalReport) -> list[StructuredTool]:
             description=_income_valuation_description(),
         ),
     ]
+
+
+# ── Assistant-only tools (Tier 2, 2026-08-26) ─────────────────────────────────
+# Two additions beyond build_tools() above, for the free-form chat console:
+# on-demand retrieval (the owner's own "let me prompt the retriever more
+# freely" ask) and a WRITE-INTENT tool that never actually writes -- see
+# propose_text_update's own docstring for why.
+
+_PROPOSABLE_FIELDS = {
+    "subject_description": "Свободното описание на оценявания имот",
+    "submarket_rationale": "Обосновката на съпоставимата зона (пазарен подход)",
+    "income_market_rationale": "Обосновката на доходния подход",
+}
+
+
+def _retrieve_comparables_fn(db: Session, report: AppraisalReport, comparable_type: str):
+    # No docstring here -- StructuredTool.from_function's explicit
+    # description= at the call site is what the model actually sees (an
+    # f-string docstring would NOT populate __doc__ anyway, same trap as
+    # _income_valuation_description's own note).
+    def retrieve(k: int = 6) -> dict:
+        comps = retrieve_comparables(db, report, k=k, comparable_type=comparable_type)
+        trimmed = [
+            {
+                "id": c["id"], "ad_url": c.get("ad_url"),
+                "location": f"{c.get('title_city_model') or ''} {c.get('title_geo_2_model') or ''}".strip(),
+                "area_sqm": c.get("area_sqm_model"), "total_price": c.get("total_price"),
+                "price_per_sqm": c.get("price_per_sqm_model"),
+                "construction": c.get("construction_type_model"), "year": c.get("construction_year_model"),
+                "closeness_pct": round((1 - float(c["distance"])) * 100) if c.get("distance") is not None else None,
+            }
+            for c in comps
+        ]
+        return {"comparables": trimmed, "count": len(trimmed)}
+
+    return retrieve
+
+
+def _propose_text_update_fn(report: AppraisalReport):
+    def propose_text_update(field: str, new_text: str) -> dict:
+        """Propose new text for one of the report's free-text fields:
+        subject_description, submarket_rationale, or income_market_rationale.
+        This does NOT save anything -- it only returns a proposal that the
+        appraiser sees as a card in the chat with an explicit "Приложи"
+        (Apply) button. Nothing is ever written to the report without the
+        appraiser clicking it, same as every other AI-generated text
+        elsewhere in this app. Call this when the appraiser asks you to
+        write/update/draft one of these fields; do not just print the text
+        in your own reply instead of calling this."""
+        if field not in _PROPOSABLE_FIELDS:
+            return {"error": f"Unknown field {field!r}. Valid: {sorted(_PROPOSABLE_FIELDS)}"}
+        return {
+            "proposed": True,
+            "field": field,
+            "field_label": _PROPOSABLE_FIELDS[field],
+            "text": new_text,
+        }
+    return propose_text_update
+
+
+def _list_documents_fn(db: Session, report: AppraisalReport):
+    def list_documents() -> dict:
+        """Lists uploaded documents for this report (id, filename, type,
+        status). Call this first if you're not sure which document_id to
+        pass to read_document, or the appraiser asks what's been uploaded."""
+        docs = (
+            db.query(ReportDocument)
+            .filter(ReportDocument.report_id == report.id)
+            .order_by(ReportDocument.created_at.desc())
+            .all()
+        )
+        return {
+            "documents": [
+                {"id": str(d.id), "filename": d.filename, "document_type": d.document_type, "status": d.status}
+                for d in docs
+            ]
+        }
+    return list_documents
+
+
+def _read_document_fn(db: Session, report: AppraisalReport):
+    def read_document(document_id: str) -> dict:
+        """Returns the extracted structured facts for one uploaded document
+        (notarial act, company document, or скица -- see list_documents for
+        available ids). Use this when the appraiser asks you to use
+        information from an uploaded document, e.g. to enrich the property
+        description or explain what a скица's terraces mean for area."""
+        doc = (
+            db.query(ReportDocument)
+            .filter(ReportDocument.id == document_id, ReportDocument.report_id == report.id)
+            .first()
+        )
+        if doc is None:
+            return {"error": "Документът не е намерен за този доклад."}
+        if doc.status != "ready":
+            return {"status": doc.status, "error": doc.error_message}
+        return {
+            "filename": doc.filename,
+            "document_type": doc.document_type,
+            "extraction_method": doc.extraction_method,
+            "data": doc.extracted_data,
+        }
+    return read_document
+
+
+def _critical_review_fn(db: Session, report: AppraisalReport, conversation_id, provider: str | None, model: str | None):
+    def request_critical_review() -> dict:
+        """Runs a SEPARATE, structured critical review of the report's
+        current state (comparables statistics, computed values, AVM
+        prediction if attached, already-written texts) -- checks whether
+        the narrative matches the numbers, comments on the AVM prediction,
+        and flags missing caveats given the report's purpose. Read-only,
+        never writes to the report. Call this when the appraiser asks for a
+        critical review, sanity check, or second opinion on the draft --
+        this is a genuinely different, more thorough pass than reasoning
+        about it yourself in this reply."""
+        critique, call_log = critic_graph.run_critical_review(db, report, provider, model)
+        if call_log and conversation_id is not None:
+            try:
+                for entry in call_log:
+                    cost = estimate_cost_usd(entry["model"], entry["input_tokens"], entry["output_tokens"], provider=entry["provider"])
+                    db.add(AgentLlmCall(
+                        conversation_id=conversation_id, call_label=entry["call_label"],
+                        provider=entry["provider"], model=entry["model"],
+                        input_tokens=entry["input_tokens"], output_tokens=entry["output_tokens"],
+                        estimated_cost_usd=cost,
+                    ))
+                db.commit()
+            except Exception:
+                db.rollback()
+        return critique
+    return request_critical_review
+
+
+def build_assistant_tools(
+    db: Session, report: AppraisalReport,
+    conversation_id=None, provider: str | None = None, model: str | None = None,
+) -> list[StructuredTool]:
+    """build_tools() (read-only stats/compute) plus retrieval-on-demand, the
+    write-intent proposal tool, document reading, and the critic graph --
+    the full toolbox for the chat console's conversational agent.
+    conversation_id/provider/model are only used to log request_critical_review's
+    own LLM call to agent_llm_calls under the right conversation; the
+    critique itself always uses `provider`/`model` (the conversation's
+    current model choice, not necessarily a separate "critic model")."""
+    tools = build_tools(db, report)
+    tools.append(StructuredTool.from_function(_list_documents_fn(db, report), name="list_documents"))
+    tools.append(StructuredTool.from_function(_read_document_fn(db, report), name="read_document"))
+    tools.append(StructuredTool.from_function(
+        _critical_review_fn(db, report, conversation_id, provider, model), name="request_critical_review",
+    ))
+    tools.append(StructuredTool.from_function(
+        _retrieve_comparables_fn(db, report, "sale"), name="retrieve_sale_comparables",
+        description="Semantic search for sale comparables closest to the subject property (up to k, default 6).",
+    ))
+    tools.append(StructuredTool.from_function(
+        _retrieve_comparables_fn(db, report, "rent"), name="retrieve_rent_comparables",
+        description="Semantic search for rent comparables closest to the subject property (up to k, default 6).",
+    ))
+    tools.append(StructuredTool.from_function(
+        _propose_text_update_fn(report), name="propose_text_update",
+        description=(
+            "Propose new text for subject_description, submarket_rationale, or "
+            "income_market_rationale. Never writes anything -- returns a proposal "
+            "the appraiser must explicitly apply. Always use this tool (not a plain "
+            "reply) when asked to draft/update one of these fields."
+        ),
+    ))
+    return tools

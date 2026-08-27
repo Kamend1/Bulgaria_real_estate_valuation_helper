@@ -9,6 +9,9 @@
       {% if report.status == 'finalized' %}
         &nbsp;·&nbsp;<span class="badge badge-ok" style="font-size:0.7rem">финализиран</span>
       {% endif %}
+      {% if draft_reports|length > 1 %}
+        &nbsp;·&nbsp; {% include "_report_switcher.html" %}
+      {% endif %}
     </div>
     <h1 style="margin:0">{{ report.title }}</h1>
   </div>

@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     report_template_path: str = "templates/reports/appraisal_template.docx"
     avm_models_dir: str = "models/avm"
     log_dir: str = "logs"
+    # Uploaded report documents (Tier 3, 2026-08-26) -- local disk, not R2:
+    # unlike AVM models/backups (meant to be fetched by ANY deployed
+    # instance), these belong to one appraiser's own reports on their own
+    # instance, so there's no cross-instance fetch need that would justify
+    # object storage.
+    documents_dir: str = "data/report_documents"
 
     scrape_max_workers_routes: int = 8
     scrape_max_workers_listings: int = 16
@@ -66,12 +72,23 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     google_api_key: str = ""
-    # Swappable to "openai" | "anthropic" | "google_genai" | (later) "ollama"
-    # — same factory function in app/services/llm/providers.py, just a new
-    # branch + the matching small partner package + its own *_api_key
-    # setting for anything beyond these three.
+    # Swappable to "openai" | "anthropic" | "google_genai" | "local"
     llm_default_provider: str = "openai"
     llm_default_embedding_provider: str = "openai"
+
+    # Local model runtime (LM Studio / Ollama / vLLM / any OpenAI-compatible
+    # server), Tier 0 of the multi-agent chat console (2026-08-25). No new
+    # SDK dependency -- these servers all speak the OpenAI Chat Completions
+    # API, so app/services/llm/providers.py's "local" branch just points the
+    # existing ChatOpenAI/OpenAIEmbeddings classes at this base_url instead
+    # of api.openai.com. Empty base_url means the provider is simply not
+    # offered (list_configured_providers), not an error. api_key defaults to
+    # a placeholder since local servers generally don't check it but the
+    # OpenAI SDK requires a non-empty string.
+    # Common values: LM Studio -> http://localhost:1234/v1
+    #                Ollama     -> http://localhost:11434/v1
+    local_llm_base_url: str = ""
+    local_llm_api_key: str = "not-needed"
 
     @field_validator("secret_key")
     @classmethod

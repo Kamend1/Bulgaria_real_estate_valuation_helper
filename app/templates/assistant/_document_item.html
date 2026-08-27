@@ -1,0 +1,23 @@
+{# One uploaded document (Tier 3, 2026-08-26) -- used both for the initial
+   list and appended after a synchronous upload+extract POST. #}
+<div class="doc-item" id="doc-{{ doc.id }}" style="border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.7rem;margin-bottom:0.4rem">
+  <div class="hint">
+    <strong>{{ doc.filename }}</strong> — {{ document_type_labels.get(doc.document_type, doc.document_type) }}
+    {% if doc.status == "processing" %}
+    <span class="badge badge-warn" style="display:inline-block">обработва се…</span>
+    {% elif doc.status == "ready" %}
+    <span class="badge badge-ok" style="display:inline-block">готово{% if doc.extraction_method == "ocr_vision" %} (OCR){% endif %}</span>
+    {% elif doc.status == "failed" %}
+    <span class="badge badge-warn" style="display:inline-block">грешка</span>
+    {% endif %}
+  </div>
+
+  {% if doc.status == "ready" %}
+  <details style="margin-top:0.3rem">
+    <summary class="hint" style="cursor:pointer">резултат от извличането</summary>
+    <pre style="white-space:pre-wrap;font-size:0.78rem;margin-top:0.3rem">{{ doc.extracted_data | pprint }}</pre>
+  </details>
+  {% elif doc.status == "failed" %}
+  <p class="hint" style="color:var(--error,#dc2626);margin-top:0.2rem">{{ doc.error_message }}</p>
+  {% endif %}
+</div>

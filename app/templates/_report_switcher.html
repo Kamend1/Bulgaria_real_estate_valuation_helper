@@ -1,0 +1,24 @@
+{# Quick draft-report switcher (2026-08-26) -- lets the appraiser pick among
+   their own non-finalized reports directly from /comparables/ or /assistant/
+   instead of navigating to /reports/ first. Included with `draft_reports`
+   (list[AppraisalReport]), `report` (the currently active one), and
+   `switch_next` (which page to return to after switching -- "/comparables/"
+   or "/assistant/") in context. Reuses the existing POST /reports/{id}/open
+   route (see reports.py) rather than a new endpoint -- just adds a `next`
+   field so it returns to the page you switched from instead of always
+   bouncing to /comparables/. #}
+{% if draft_reports|length > 1 %}
+<form action="/reports/{{ report.id }}/open" method="post" class="report-switcher-form"
+      style="display:inline-flex;align-items:center;gap:0.35rem">
+  <span class="hint">Чернова:</span>
+  <select title="Превключи чернова доклад" class="income-label" style="padding:0.25rem"
+          onchange="this.form.action = '/reports/' + this.value + '/open'; this.form.submit()">
+    {% for r in draft_reports %}
+    <option value="{{ r.id }}" {% if r.id == report.id %}selected{% endif %}>
+      {{ r.subject_address or r.subject_city or r.title or ('Чернова от ' ~ r.created_at.strftime('%d.%m.%Y')) }}
+    </option>
+    {% endfor %}
+  </select>
+  <input type="hidden" name="next" value="{{ switch_next }}">
+</form>
+{% endif %}

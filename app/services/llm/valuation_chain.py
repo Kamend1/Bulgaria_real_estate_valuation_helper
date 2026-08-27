@@ -29,7 +29,7 @@ from typing import Callable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import Session
 
-from app.db.models import AiValuationRun, AppraisalReport
+from app.db.models import AgentLlmCall, AiValuationRun, AppraisalReport
 from app.services.comparable_service import get_pool_with_stats
 from app.services.llm.providers import estimate_cost_usd, get_chat_model, resolve_chat_model
 from app.services.llm.retriever import retrieve_comparables
@@ -204,6 +204,32 @@ def _json_safe(value):
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return value
+
+
+def _persist_call_log(db: Session, run_id, provider: str, model_id: str, call_log: list[dict]) -> None:
+    """Bulk-inserts one AgentLlmCall row per entry in call_log (Tier 1,
+    2026-08-26), linked to the just-created ai_valuation_runs row. Best-
+    effort: a failure here must never take down an otherwise-successful (or
+    already-logged-as-failed) generation -- the aggregate ai_valuation_runs
+    row is the load-bearing record either way, this is supplementary
+    detail."""
+    if not call_log:
+        return
+    try:
+        for entry in call_log:
+            cost = estimate_cost_usd(model_id, entry["input_tokens"], entry["output_tokens"], provider=provider)
+            db.add(AgentLlmCall(
+                ai_valuation_run_id=run_id,
+                call_label=entry["call_label"],
+                provider=provider,
+                model=model_id,
+                input_tokens=entry["input_tokens"],
+                output_tokens=entry["output_tokens"],
+                estimated_cost_usd=cost,
+            ))
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 def _format_comparables(comps: list[dict]) -> str:
@@ -393,8 +419,17 @@ def generate_valuation_backbone(
     final_response: AIMessage | None = None
     income_valuation_result: dict | None = None
 
+    # Per-call breakdown (Tier 1, 2026-08-26): total_input_tokens/
+    # total_output_tokens above are the SUM ai_valuation_runs logs -- this
+    # list captures each individual LLM call separately (which tool-loop
+    # turn, how many tokens, what it cost) and gets persisted to
+    # agent_llm_calls once the run row exists (both success and failure
+    # paths below), so "which step ate the budget" is answerable after the
+    # fact, not just "how much did the whole thing cost".
+    call_log: list[dict] = []
+
     try:
-        for _ in range(MAX_TOOL_ITERATIONS):
+        for iteration_idx in range(MAX_TOOL_ITERATIONS):
             # Streamed rather than invoke()'d (2026-08-25, cost-visibility
             # audit): a reasoning-heavy "pro"-tier call can take minutes
             # with invoke(), during which tokens_so_far sat frozen and the
@@ -413,8 +448,15 @@ def generate_valuation_backbone(
                 progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(live_text) // 4, 0)
                 emit()
             response: AIMessage = chunk_accum
-            total_input_tokens += last_chunk_usage.get("input_tokens", 0)
-            total_output_tokens += last_chunk_usage.get("output_tokens", 0)
+            call_in = last_chunk_usage.get("input_tokens", 0)
+            call_out = last_chunk_usage.get("output_tokens", 0)
+            total_input_tokens += call_in
+            total_output_tokens += call_out
+            call_log.append({
+                "call_label": f"tool_loop_{iteration_idx + 1}",
+                "input_tokens": call_in,
+                "output_tokens": call_out,
+            })
             progress.tokens_so_far = total_input_tokens + total_output_tokens
             emit()
 
@@ -455,8 +497,15 @@ def generate_valuation_backbone(
                 progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(final_text) // 4, 1)
                 emit()
             if last_chunk_usage:
-                total_input_tokens += last_chunk_usage.get("input_tokens", 0)
-                total_output_tokens += last_chunk_usage.get("output_tokens", 0)
+                call_in = last_chunk_usage.get("input_tokens", 0)
+                call_out = last_chunk_usage.get("output_tokens", 0)
+                total_input_tokens += call_in
+                total_output_tokens += call_out
+                call_log.append({
+                    "call_label": "fallback_stream",
+                    "input_tokens": call_in,
+                    "output_tokens": call_out,
+                })
     except Exception as exc:
         # Cost-visibility audit (2026-08-25): a failure partway through the
         # tool-calling loop (rate limit, network error, etc.) used to lose
@@ -465,7 +514,7 @@ def generate_valuation_backbone(
         # ai_valuation_runs unless the whole generation completed. Real
         # money, invisible in the cost audit trail. Now logged regardless of
         # outcome, with whatever totals had accumulated before the failure.
-        cost = estimate_cost_usd(model_id, total_input_tokens, total_output_tokens)
+        cost = estimate_cost_usd(model_id, total_input_tokens, total_output_tokens, provider=provider)
         run = AiValuationRun(
             report_id=report.id,
             provider=provider,
@@ -489,6 +538,7 @@ def generate_valuation_backbone(
         )
         db.add(run)
         db.commit()
+        _persist_call_log(db, run.id, provider, model_id, call_log)
         progress.status = "error"
         progress.error = (
             f"AI генерацията прекъсна с грешка след използвани "
@@ -533,7 +583,7 @@ def generate_valuation_backbone(
         "income": income_result,
     })
 
-    cost = estimate_cost_usd(model_id, total_input_tokens, total_output_tokens)
+    cost = estimate_cost_usd(model_id, total_input_tokens, total_output_tokens, provider=provider)
     result["input_tokens"] = total_input_tokens
     result["output_tokens"] = total_output_tokens
     result["estimated_cost_usd"] = cost
@@ -550,6 +600,7 @@ def generate_valuation_backbone(
     )
     db.add(run)
     db.commit()
+    _persist_call_log(db, run.id, provider, model_id, call_log)
 
     progress.status = "done"
     progress.step = "Готово"

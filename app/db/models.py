@@ -383,6 +383,91 @@ class AiValuationRun(Base):
     report = relationship("AppraisalReport")
 
 
+class AgentLlmCall(Base):
+    """One individual LLM API call -- finer-grained than AiValuationRun,
+    which logs one row per whole generation with tokens SUMMED across every
+    internal call in its tool-calling loop. Added for the multi-agent chat
+    console (Tier 1, 2026-08-26): "which step ate the budget" needs
+    per-call detail an aggregate can't show (see the gpt-5.4-pro truncation
+    audit, 2026-08-25, where this distinction mattered directly).
+    ai_valuation_run_id links calls belonging to the existing single-shot
+    generation flow; conversation_id is reserved, unused until Tier 2's
+    chat console exists -- a call may eventually have one or the other, not
+    necessarily both."""
+    __tablename__ = "agent_llm_calls"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ai_valuation_run_id = Column(UUID(as_uuid=True), ForeignKey("ai_valuation_runs.id", ondelete="CASCADE"), nullable=True, index=True)
+    conversation_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    call_label = Column(Text, nullable=False)   # e.g. "tool_loop_1", "fallback_stream", (later) "critic"
+    provider = Column(Text, nullable=False)
+    model = Column(Text, nullable=False)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    estimated_cost_usd = Column(Numeric(10, 6))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgentConversation(Base):
+    """One chat conversation with the multi-agent assistant (Tier 2,
+    2026-08-26). Scoped to a single report -- v1 deliberately does not
+    offer a report-agnostic general chat; the owner's own framing was that
+    the end goal is still writing an appraisal report."""
+    __tablename__ = "agent_conversations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    report = relationship("AppraisalReport")
+    messages = relationship("AgentMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="AgentMessage.created_at")
+
+
+class AgentMessage(Base):
+    """One turn in an AgentConversation -- enough to reconstruct the
+    LangChain message list on the next turn (role/content, plus tool_calls
+    for an assistant message that called tools, or tool_call_id for the
+    matching tool-result message)."""
+    __tablename__ = "agent_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("agent_conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(Text, nullable=False)   # user | assistant | tool
+    content = Column(Text)
+    tool_calls = Column(JSONB)            # [{id, name, args}]
+    tool_call_id = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    conversation = relationship("AgentConversation", back_populates="messages")
+
+
+class ReportDocument(Base):
+    """One uploaded document (Tier 3, 2026-08-26) -- notarial act, company
+    founding/partnership document, or a floor-plan скица. Scoped to a
+    report, same v1 framing as AgentConversation. extracted_data's shape
+    depends on document_type (see app/services/documents.py's per-type
+    Pydantic schemas) -- deliberately generic JSONB, not per-type columns."""
+    __tablename__ = "report_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    filename = Column(Text, nullable=False)
+    document_type = Column(Text, nullable=False)   # notarial_act | founding_document | partnership_agreement | sketch | other
+    storage_path = Column(Text, nullable=False)     # relative to settings.documents_dir
+    mime_type = Column(Text)
+    status = Column(Text, nullable=False, default="processing")   # processing | ready | failed
+    extraction_method = Column(Text)   # text | ocr_vision
+    extracted_data = Column(JSONB)
+    error_message = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    report = relationship("AppraisalReport")
+
+
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
 class User(Base):

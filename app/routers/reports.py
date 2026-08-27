@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,13 @@ from app.services.comparable_service import (
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+# Whitelisted redirect targets for /reports/{id}/open's `next` field --
+# never accepts an arbitrary path (would be an open redirect); the switcher
+# partial (_report_switcher.html) is the only current caller that sends a
+# non-default value, so a user could only ever land back on the page they
+# switched from.
+_OPEN_REDIRECT_TARGETS = {"/comparables/", "/assistant/"}
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -40,12 +47,17 @@ async def open_report(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    next: str = Form("/comparables/"),
 ):
     report = get_report_for_user(db, report_id, user.id)
     if not report:
         raise HTTPException(status_code=404)
     request.session["active_report_id"] = str(report.id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    # `next` lets the quick switcher (_report_switcher.html) return you to
+    # the page you switched from (e.g. /assistant/) instead of always
+    # bouncing to /comparables/ -- whitelisted, never an open redirect.
+    target = next if next in _OPEN_REDIRECT_TARGETS else "/comparables/"
+    return RedirectResponse(url=target, status_code=303)
 
 
 @router.post("/{report_id}/finalize")

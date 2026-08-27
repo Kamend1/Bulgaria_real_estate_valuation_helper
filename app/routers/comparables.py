@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import AiValuationRun, AppraisalReport, ComparablePool, User
+from app.db.models import AgentLlmCall, AiValuationRun, AppraisalReport, ComparablePool, User
 from app.db.session import db_session, get_db
 from app.dependencies import require_auth as get_current_user
 from app.rate_limit import limiter
@@ -34,6 +34,7 @@ from app.services.comparable_service import (
     export_excel,
     finalize_user_report,
     generate_docx,
+    get_draft_reports_for_user,
     get_or_create_draft,
     get_purpose_options,
     get_pool_with_stats,
@@ -148,6 +149,8 @@ async def comparables_page(
             "report_purpose_options": get_purpose_options(),
             "MAX_PINNED": MAX_PINNED,
             "adjustment_factor_labels": ADJUSTMENT_FACTOR_LABELS,
+            "draft_reports": get_draft_reports_for_user(db, user.id),
+            "switch_next": "/comparables/",
         },
     )
 
@@ -345,6 +348,20 @@ async def ai_history(
         .order_by(AiValuationRun.created_at.desc())
         .all()
     )
+    # Per-call breakdown (Tier 1, 2026-08-26) -- one query for all runs'
+    # calls rather than N+1, grouped back onto each item below.
+    run_ids = [run.id for run in runs]
+    calls_by_run: dict = {}
+    if run_ids:
+        calls = (
+            db.query(AgentLlmCall)
+            .filter(AgentLlmCall.ai_valuation_run_id.in_(run_ids))
+            .order_by(AgentLlmCall.created_at.asc())
+            .all()
+        )
+        for call in calls:
+            calls_by_run.setdefault(call.ai_valuation_run_id, []).append(call)
+
     items = []
     for run in runs:
         r = run.output or {}
@@ -353,6 +370,7 @@ async def ai_history(
             "id": str(run.id), "created_at": run.created_at,
             "provider": run.provider, "model": run.model,
             "result": r, "combined_text": combined_text, "combined_income_text": combined_income_text,
+            "calls": calls_by_run.get(run.id, []),
         })
     return templates.TemplateResponse(request, "comparables/_ai_history.html", {"items": items})
 
