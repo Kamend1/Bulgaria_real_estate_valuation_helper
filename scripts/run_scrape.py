@@ -339,6 +339,37 @@ def main():
             capture.append_log(_skip_msg)
             _db_update(run_uuid, last_message=_skip_msg)
 
+        # ── Embeddings ────────────────────────────────────────────────────────────────────────
+        # Re-embed listings touched by this run (new, or changed since last
+        # embedded) -- feeds the AI-assisted valuation RAG panel and the AI
+        # Assistant's retrieval tools. Non-fatal: a missing OPENAI_API_KEY or
+        # a transient API error must not fail the whole scrape.
+        #
+        # Historical note (found via a real embedding-coverage audit,
+        # 2026-08-28): this step previously existed ONLY in
+        # scrape_service.run_scrape_background(), a function nothing calls
+        # -- real scrapes have always gone through this file (launched via
+        # subprocess.Popen from app/routers/scrape.py), so the "automatic
+        # embedding refresh on every scrape" documented in README never
+        # actually ran. A live scrape (2026-08-27) left 24,243 eligible
+        # listings without a current embedding as a result.
+        if ingested > 0:
+            capture.append_log("─── Фаза: обновяване на семантични вектори (embeddings) ───")
+            _db_update(run_uuid, phase="embeddings", last_message="Обновяване на семантични вектори (embeddings)…")
+            try:
+                from app.services.llm.embed_backfill import backfill_embeddings
+
+                def _embed_progress(done: int, total: int) -> None:
+                    msg = f"Embeddings: {done}/{total} обяви…"
+                    capture.append_log(msg)
+                    _db_update(run_uuid, last_message=msg)
+
+                with db_session() as s:
+                    n_embedded = backfill_embeddings(s, run_id=run_uuid, on_batch=_embed_progress)
+                capture.append_log(f"Embeddings: {n_embedded} обяви ембед-нати/обновени.")
+            except Exception as _ee:
+                capture.append_log(f"Предупреждение: embeddings не се обновиха ({_ee})")
+
         # ── Done ────────────────────────────────────────────────────────────────────────────────
         done_msg = f"Готово. Вписани: {ingested}, Архивирани: {archived}"
         capture.append_log(f"─── {done_msg} ───")
