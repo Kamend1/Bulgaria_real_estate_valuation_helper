@@ -5,6 +5,10 @@
    tool (nothing of its own to write to a report), just a generic
    tool-result fallback for query_market_stats/list_market_filter_values/
    document reads. #}
+{% set GROUP_BY_LABELS = {
+  "run": "Дата на засичане", "geo_category": "Гео-категория", "city": "Град",
+  "neighborhood": "Квартал", "construction_type": "Тип строителство", "property_type_slug": "Тип имот",
+} %}
 {% if not messages %}
 <p class="hint">Все още няма съобщения. Попитай за времеви ред, сравнение между квартали, типове строителство или наемния пазар.</p>
 {% endif %}
@@ -22,6 +26,55 @@
   {% elif msg.role == "assistant" and msg.tool_calls %}
   <div class="chat-msg chat-msg-tool-call">
     <span class="hint">🔧 {{ msg.tool_calls | map(attribute='name') | join(', ') }}</span>
+  </div>
+
+  {# query_market_stats results render as a real table -- the numbers the
+     narrative below is supposed to be grounded in are otherwise buried in a
+     collapsed pprint dump, which made the connection between commentary and
+     data hard to see/verify at a glance (real feedback, 2026-08-28) even
+     when the model's citations were accurate. Identified by shape
+     (group_by + rows), not tool name, since msg here only carries the
+     parsed JSON, not which tool produced it. #}
+  {% elif msg.role == "tool" and msg.parsed and msg.parsed.rows is defined and msg.parsed.group_by is defined %}
+  <div class="chat-msg chat-msg-tool-result">
+    <div class="proposal-card" style="background:#f8fafc;border-color:#e2e8f0;max-width:94%">
+      <div class="hint" style="margin-bottom:0.4rem">
+        📊 {{ msg.parsed.rows|length }} резултата — {{ GROUP_BY_LABELS.get(msg.parsed.group_by, msg.parsed.group_by) }}
+        {% if msg.parsed.n_runs_included %}(последните {{ msg.parsed.n_runs_included }} засичания){% endif %}
+      </div>
+      {% if msg.parsed.rows %}
+      <div class="pool-table-wrap">
+      <table class="comp-table">
+        <thead>
+          <tr>
+            <th>{{ GROUP_BY_LABELS.get(msg.parsed.group_by, msg.parsed.group_by) }}</th>
+            <th style="text-align:right">Обяви</th>
+            <th style="text-align:right">Медиана €/кв.м</th>
+            <th style="text-align:right">P25</th>
+            <th style="text-align:right">P75</th>
+            <th style="text-align:right">Средно</th>
+            <th style="text-align:right">DOM</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in msg.parsed.rows %}
+          <tr>
+            <td class="sub-text">{{ row.run_date if msg.parsed.group_by == "run" else row.group_value }}</td>
+            <td style="text-align:right">{{ row.n_listings }}</td>
+            <td style="text-align:right">{{ '%.0f'|format(row.median_ppsqm) if row.median_ppsqm is not none else '—' }}</td>
+            <td style="text-align:right">{{ '%.0f'|format(row.p25_ppsqm) if row.p25_ppsqm is not none else '—' }}</td>
+            <td style="text-align:right">{{ '%.0f'|format(row.p75_ppsqm) if row.p75_ppsqm is not none else '—' }}</td>
+            <td style="text-align:right">{{ '%.0f'|format(row.mean_ppsqm) if row.mean_ppsqm is not none else '—' }}</td>
+            <td style="text-align:right">{{ row.median_dom if row.median_dom is not none else '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <p class="hint">Няма намерени обяви за тези филтри.</p>
+      {% endif %}
+    </div>
   </div>
 
   {% elif msg.role == "tool" and msg.parsed %}
