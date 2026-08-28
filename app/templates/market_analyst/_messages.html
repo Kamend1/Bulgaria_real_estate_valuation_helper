@@ -1,0 +1,60 @@
+{# Full message history for the market analyst conversation (Phase 10,
+   2026-08-28). Re-rendered wholesale after each turn, same simplicity as
+   assistant/_messages.html. No proposal-card / critic-card branches here
+   -- this agent has no propose_text_update or request_critical_review
+   tool (nothing of its own to write to a report), just a generic
+   tool-result fallback for query_market_stats/list_market_filter_values/
+   document reads. #}
+{% if not messages %}
+<p class="hint">Все още няма съобщения. Попитай за времеви ред, сравнение между квартали, типове строителство или наемния пазар.</p>
+{% endif %}
+{% for msg in messages %}
+  {% if msg.role == "user" %}
+  <div class="chat-msg chat-msg-user">
+    <div class="chat-bubble">{{ msg.content }}</div>
+  </div>
+
+  {% elif msg.role == "assistant" and msg.content %}
+  <div class="chat-msg chat-msg-assistant">
+    <div class="chat-bubble" style="white-space:pre-line">{{ msg.content }}</div>
+  </div>
+
+  {% elif msg.role == "assistant" and msg.tool_calls %}
+  <div class="chat-msg chat-msg-tool-call">
+    <span class="hint">🔧 {{ msg.tool_calls | map(attribute='name') | join(', ') }}</span>
+  </div>
+
+  {% elif msg.role == "tool" and msg.parsed %}
+  <div class="chat-msg chat-msg-tool-result">
+    <details>
+      <summary class="hint" style="cursor:pointer">🔧 резултат от инструмент</summary>
+      <pre style="white-space:pre-wrap;font-size:0.8rem;margin-top:0.3rem">{{ msg.parsed | pprint }}</pre>
+    </details>
+  </div>
+  {% endif %}
+{% endfor %}
+
+{% if calls %}
+<p class="hint" style="margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.5rem">
+  Общо в разговора: {{ total_tokens }} токена
+  {% if total_cost %}&nbsp;·&nbsp; ~${{ '%.4f' % total_cost }}{% endif %}
+  &nbsp;·&nbsp; <a href="#" onclick="document.getElementById('chat-call-log').style.display='block';this.style.display='none';return false">детайлна разбивка</a>
+</p>
+<div id="chat-call-log" style="display:none;margin-top:0.4rem">
+  <div class="pool-table-wrap">
+  <table class="comp-table">
+    <thead><tr><th>Стъпка</th><th style="text-align:right">Вх.</th><th style="text-align:right">Изх.</th><th style="text-align:right">Цена</th></tr></thead>
+    <tbody>
+      {% for call in calls %}
+      <tr>
+        <td class="sub-text">{{ call.call_label }}</td>
+        <td style="text-align:right">{{ call.input_tokens }}</td>
+        <td style="text-align:right">{{ call.output_tokens }}</td>
+        <td style="text-align:right">{% if call.estimated_cost_usd is not none %}${{ '%.6f' % call.estimated_cost_usd }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}

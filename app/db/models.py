@@ -409,14 +409,23 @@ class AgentLlmCall(Base):
 
 
 class AgentConversation(Base):
-    """One chat conversation with the multi-agent assistant (Tier 2,
-    2026-08-26). Scoped to a single report -- v1 deliberately does not
-    offer a report-agnostic general chat; the owner's own framing was that
-    the end goal is still writing an appraisal report."""
+    """One chat conversation with an AI agent (Tier 2, 2026-08-26; extended
+    for the report-agnostic market analyst, Phase 10, 2026-08-28).
+
+    Two kinds share this table rather than duplicating it (agent_type
+    discriminates):
+    - "report_assistant" (v1 default) -- scoped to a single report via
+      report_id; the owner's own framing was that the end goal is still
+      writing an appraisal report.
+    - "market_analyst" -- report_id is NULL; one persistent conversation
+      per user for free-form market research (time series, segment/geo/
+      construction-type cross-sections) across the whole listings corpus,
+      not tied to any one case."""
     __tablename__ = "agent_conversations"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=True, index=True)
+    agent_type = Column(Text, nullable=False, default="report_assistant")   # report_assistant | market_analyst
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     title = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -466,6 +475,31 @@ class ReportDocument(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     report = relationship("AppraisalReport")
+
+
+class MarketDocument(Base):
+    """One uploaded document in the market analyst's reference library
+    (Phase 10, 2026-08-28) -- market reports, research articles, official
+    statistics, etc. Deliberately NOT scoped to a report or a user: a
+    shared reference library across the whole app, mirroring how the
+    underlying listings corpus itself is shared, not per-user siloed (see
+    app/services/market_documents.py). extracted_data stays purely
+    descriptive (what the document says) -- cross-referencing it against
+    live imot.bg data happens dynamically in conversation via
+    query_market_stats, not baked in at upload time."""
+    __tablename__ = "market_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    uploaded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    filename = Column(Text, nullable=False)
+    document_type = Column(Text, nullable=False)   # market_report | research_article | government_statistic | news | other
+    storage_path = Column(Text, nullable=False)     # relative to settings.market_documents_dir
+    mime_type = Column(Text)
+    status = Column(Text, nullable=False, default="processing")   # processing | ready | failed
+    extraction_method = Column(Text)   # text | ocr_vision
+    extracted_data = Column(JSONB)
+    error_message = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────

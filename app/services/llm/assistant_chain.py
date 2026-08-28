@@ -79,19 +79,22 @@ class ChatProgress:
     error: str | None = None
 
 
-def get_or_create_conversation(db: Session, report_id, user_id: int) -> AgentConversation:
-    """One conversation per (report, user) for v1 -- reopening the
-    assistant on the same report resumes the same thread rather than
-    starting fresh each time."""
-    conv = (
-        db.query(AgentConversation)
-        .filter(AgentConversation.report_id == report_id, AgentConversation.user_id == user_id)
-        .order_by(AgentConversation.created_at.desc())
-        .first()
+def get_or_create_conversation(db: Session, report_id, user_id: int, agent_type: str = "report_assistant") -> AgentConversation:
+    """One conversation per (report, user) for the report-scoped assistant
+    (v1's default agent_type -- reopening the assistant on the same report
+    resumes the same thread rather than starting fresh each time). For a
+    report-agnostic agent like the market analyst (Phase 10, 2026-08-28),
+    pass report_id=None and agent_type="market_analyst" -- one persistent
+    conversation per (user, agent_type) instead of per (user, report)."""
+    query = db.query(AgentConversation).filter(
+        AgentConversation.user_id == user_id, AgentConversation.agent_type == agent_type,
     )
+    if report_id is not None:
+        query = query.filter(AgentConversation.report_id == report_id)
+    conv = query.order_by(AgentConversation.created_at.desc()).first()
     if conv:
         return conv
-    conv = AgentConversation(report_id=report_id, user_id=user_id)
+    conv = AgentConversation(report_id=report_id, user_id=user_id, agent_type=agent_type)
     db.add(conv)
     db.commit()
     db.refresh(conv)

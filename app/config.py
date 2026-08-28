@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # instance, so there's no cross-instance fetch need that would justify
     # object storage.
     documents_dir: str = "data/report_documents"
+    # Market analyst's reference library (Phase 10, 2026-08-28) -- deliberately
+    # separate directory from documents_dir: these aren't tied to any report,
+    # shared across all users, same reasoning as market_documents being its
+    # own DB table rather than a report_documents row with report_id=NULL.
+    market_documents_dir: str = "data/market_documents"
 
     scrape_max_workers_routes: int = 8
     scrape_max_workers_listings: int = 16

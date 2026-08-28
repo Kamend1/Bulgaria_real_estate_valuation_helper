@@ -32,7 +32,6 @@ the problem:
 """
 from __future__ import annotations
 
-import base64
 import uuid
 from pathlib import Path
 
@@ -42,6 +41,14 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import ReportDocument
+from app.services.llm.doc_extraction import (
+    MAX_OCR_PAGES,
+    MIN_NATIVE_TEXT_CHARS,
+    b64_image as _b64_image,
+    extract_native_text as _extract_native_text,
+    ocr_via_vision as _ocr_via_vision,
+    render_pdf_pages_as_png as _render_pdf_pages_as_png,
+)
 from app.services.llm.providers import get_chat_model
 
 # Bulgarian appraisal practice: covered/uncovered terraces and balconies
@@ -50,9 +57,6 @@ from app.services.llm.providers import get_chat_model
 # vision model's job is only to correctly read room areas off the sketch;
 # this coefficient (not the model) decides what that means for total area.
 TERRACE_AREA_COEFFICIENT = 0.3
-
-MIN_NATIVE_TEXT_CHARS = 50   # below this, treat a PDF as "no text layer" (scanned)
-MAX_OCR_PAGES = 8
 
 
 # ── Structured extraction schemas (one per document_type) ──────────────────────
@@ -196,70 +200,6 @@ def storage_dir() -> Path:
     p = Path(settings.documents_dir)
     p.mkdir(parents=True, exist_ok=True)
     return p
-
-
-def _b64_image(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii")
-
-
-def _render_pdf_pages_as_png(file_path: Path, max_pages: int = MAX_OCR_PAGES) -> list[bytes]:
-    import fitz   # PyMuPDF
-    images = []
-    doc = fitz.open(file_path)
-    try:
-        for i, page in enumerate(doc):
-            if i >= max_pages:
-                break
-            pix = page.get_pixmap(dpi=150)
-            images.append(pix.tobytes("png"))
-    finally:
-        doc.close()
-    return images
-
-
-def _extract_native_text(file_path: Path, mime_type: str | None) -> str | None:
-    """Text already embedded in the file (not scanned) -- None signals
-    "try vision OCR instead", not an error."""
-    suffix = file_path.suffix.lower()
-    if suffix == ".pdf":
-        import fitz
-        doc = fitz.open(file_path)
-        try:
-            text = "\n".join(page.get_text() for page in doc)
-        finally:
-            doc.close()
-        return text if len(text.strip()) >= MIN_NATIVE_TEXT_CHARS else None
-    if suffix == ".docx":
-        import docx
-        d = docx.Document(file_path)
-        text = "\n".join(p.text for p in d.paragraphs)
-        return text if len(text.strip()) >= MIN_NATIVE_TEXT_CHARS else None
-    if suffix == ".txt":
-        text = file_path.read_text(encoding="utf-8", errors="replace")
-        return text if len(text.strip()) >= MIN_NATIVE_TEXT_CHARS else None
-    return None   # images (.jpg/.png/...) have no "native text" path
-
-
-def _ocr_via_vision(file_path: Path, provider: str | None, model: str | None) -> str:
-    """Vision-LLM transcription -- used when a PDF has no text layer (a
-    scanned document) or the upload is a photo/scan image directly."""
-    suffix = file_path.suffix.lower()
-    if suffix == ".pdf":
-        page_images = _render_pdf_pages_as_png(file_path)
-    else:
-        page_images = [file_path.read_bytes()]
-
-    chat = get_chat_model(provider, model, max_tokens=4000)
-    content = [{"type": "text", "text": (
-        "Транскрибирай ЦЕЛИЯ видим текст от следните страници на документ, дословно, "
-        "на български. Без коментар, само транскрипцията, страница по страница."
-    )}]
-    for img_bytes in page_images:
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_b64_image(img_bytes)}"}})
-
-    response = chat.invoke([HumanMessage(content=content)])
-    text = response.content if isinstance(response.content, str) else str(response.content)
-    return text
 
 
 def _extract_structured_facts(text: str, document_type: str, provider: str | None, model: str | None) -> dict:

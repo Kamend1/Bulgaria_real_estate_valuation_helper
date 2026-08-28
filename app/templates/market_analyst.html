@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block body_class %}page-market-analyst{% endblock %}
+{% block title %}Пазарен анализ{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* Same layout reasoning as assistant.html -- no fixed/viewport-based
+     height on .chat-page, only .chat-messages gets a bounded scrollable
+     height, so the footer sits below normally instead of the page
+     clamping into it. */
+  .chat-page { display: flex; flex-direction: column; max-width: 900px; margin: 0 auto; }
+  .chat-header { padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); margin-bottom: 0.75rem; }
+  .chat-messages { max-height: calc(100vh - var(--navbar-h, 100px) - 340px); min-height: 240px; overflow-y: auto; padding: 0.5rem 0.25rem; display: flex; flex-direction: column; gap: 0.6rem; }
+  .chat-msg { display: flex; }
+  .chat-msg-user { justify-content: flex-end; }
+  .chat-msg-assistant, .chat-msg-proposal, .chat-msg-tool-result { justify-content: flex-start; }
+  .chat-msg-tool-call { justify-content: flex-start; padding-left: 0.5rem; }
+  .chat-bubble { max-width: 75%; padding: 0.55rem 0.8rem; border-radius: 10px; font-size: 0.92rem; line-height: 1.45; }
+  .chat-msg-user .chat-bubble { background: var(--brand, #2563eb); color: #fff; border-bottom-right-radius: 3px; }
+  .chat-msg-assistant .chat-bubble { background: var(--card-bg, #f1f5f9); border-bottom-left-radius: 3px; }
+  .chat-bubble-pending { background: var(--card-bg, #f1f5f9); font-style: italic; color: var(--muted); }
+  .chat-input-row { display: flex; gap: 0.5rem; padding-top: 0.6rem; border-top: 1px solid var(--border); align-items: flex-end; }
+  .chat-input-row textarea { flex: 1; resize: none; min-height: 2.4rem; max-height: 8rem; padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 0.92rem; }
+  .chat-model-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+  .param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.7rem 1rem; }
+  .param-cell label { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.15rem; }
+  .param-cell label .param-val { font-weight: 400; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .param-cell input[type="range"] { width: 100%; }
+  .param-cell input[type="number"] { width: 100%; padding: 0.25rem 0.4rem; border: 1px solid var(--border); border-radius: 5px; font-family: inherit; }
+  .param-cell.param-disabled { opacity: 0.45; }
+  .param-hint { font-size: 0.74rem; line-height: 1.35; margin-top: 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-page">
+  <div class="chat-header">
+    <h1 style="margin-bottom:0.2rem">Пазарен анализ</h1>
+    <p class="hint">
+      Свободен разговор с целия корпус обяви — времеви редове, сегментен анализ, наемен пазар,
+      сравнения между квартали/градове/типове строителство. Не е обвързан с конкретен доклад.
+    </p>
+  </div>
+
+  <details style="margin-bottom:0.6rem;border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem">
+    <summary class="hint" style="cursor:pointer">📚 Документи (<span id="analyst-doc-count">{{ docs|length }}</span>)</summary>
+    <div id="doc-panel" style="margin-top:0.5rem">
+      {% include "market_analyst/_documents.html" %}
+    </div>
+  </details>
+
+  <div class="chat-model-row">
+    <span class="hint">Модел:</span>
+    <select id="chat-provider-model" class="income-label" title="Модел" style="padding:0.25rem">
+      {% if models_by_provider %}
+      {% for provider_key, provider_label in configured_providers %}
+      {% set provider_models = models_by_provider.get(provider_key, []) %}
+      {% if not provider_models %}
+      <option value="" disabled>{{ provider_label }} — няма наличен модел в момента</option>
+      {% endif %}
+      {% for model_id, tier_label in provider_models %}
+      <option value="{{ provider_key }}:{{ model_id }}"
+              {% if provider_key == default_provider and model_id == default_model %}selected{% endif %}>
+        {{ provider_label }} — {{ tier_label }} ({{ model_id }})
+      </option>
+      {% endfor %}
+      {% endfor %}
+      {% endif %}
+    </select>
+  </div>
+
+  <details style="margin-bottom:0.6rem;border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem">
+    <summary class="hint" style="cursor:pointer">⚙️ Параметри на модела</summary>
+    <div class="param-grid" style="margin-top:0.6rem">
+      <div class="param-cell" data-param="temperature">
+        <label>Температура <span class="param-val" id="param-temperature-val">1.0</span></label>
+        <input type="range" id="param-temperature" min="0" max="2" step="0.1" value="1.0">
+        <p class="hint param-hint">Случайност на отговора. По-ниско (0.0–0.4) → предвидим, консистентен текст, добър за факти. По-високо (0.8–2.0) → по-разнообразен текст, по-голям риск от отклонение. Диапазонът зависи от модела (Anthropic спира на 1.0).</p>
+      </div>
+      <div class="param-cell" data-param="top_p">
+        <label>Top-p <span class="param-val" id="param-top_p-val">1.0</span></label>
+        <input type="range" id="param-top_p" min="0" max="1" step="0.05" value="1.0">
+        <p class="hint param-hint">Nucleus sampling: разглежда само най-вероятните думи, чиято сборна вероятност достига тази стойност. 1.0 = без ограничение. При Anthropic (Claude) не може да се зададе едновременно с температурата — температурата има предимство.</p>
+      </div>
+      <div class="param-cell" data-param="top_k">
+        <label>Top-k <span class="param-val" id="param-top_k-val">—</span></label>
+        <input type="number" id="param-top_k" min="1" max="500" step="1" placeholder="по подразбиране">
+        <p class="hint param-hint">Ограничава избора до K-те най-вероятни думи на всяка стъпка. Само Anthropic/Gemini/локални модели. Диапазон: 1–500; празно = по подразбиране на модела.</p>
+      </div>
+      <div class="param-cell" data-param="frequency_penalty">
+        <label>Frequency penalty <span class="param-val" id="param-frequency_penalty-val">0.0</span></label>
+        <input type="range" id="param-frequency_penalty" min="-2" max="2" step="0.1" value="0">
+        <p class="hint param-hint">Намалява вероятността за повтаряне на вече използвани думи. Само OpenAI/Gemini. Диапазон: -2.0 до 2.0, по подразбиране 0.</p>
+      </div>
+      <div class="param-cell" data-param="presence_penalty">
+        <label>Presence penalty <span class="param-val" id="param-presence_penalty-val">0.0</span></label>
+        <input type="range" id="param-presence_penalty" min="-2" max="2" step="0.1" value="0">
+        <p class="hint param-hint">Наказва всяка вече спомената дума еднократно, насърчавайки нови теми. Само OpenAI/Gemini. Диапазон: -2.0 до 2.0, по подразбиране 0.</p>
+      </div>
+      <div class="param-cell" data-param="seed">
+        <label>Seed</label>
+        <input type="number" id="param-seed" step="1" placeholder="случайно">
+        <p class="hint param-hint">Цяло число за по-повторяем резултат — полезно при тестване. „Best effort“ при OpenAI/Gemini; не се поддържа от Anthropic.</p>
+      </div>
+      <div class="param-cell" data-param="max_output_tokens">
+        <label>Макс. дължина на отговора <span class="param-val" id="param-max_output_tokens-val">2000</span></label>
+        <input type="range" id="param-max_output_tokens" min="200" max="8000" step="100" value="2000">
+        <p class="hint param-hint">Таван в токени на ЕДИН отговор (не на целия разговор). Диапазон: 200–8000, по подразбиране 2000.</p>
+      </div>
+      <div class="param-cell" data-param="max_tool_iterations">
+        <label>Макс. стъпки с инструменти <span class="param-val" id="param-max_tool_iterations-val">6</span></label>
+        <input type="range" id="param-max_tool_iterations" min="1" max="12" step="1" value="6">
+        <p class="hint param-hint">Колко последователни извиквания на инструменти (пазарни справки) може да направи анализаторът в рамките на ЕДИН отговор. По-високо → по-сложни многостъпкови сравнения, но по-скъпо/бавно. Диапазон: 1–12, по подразбиране 6.</p>
+      </div>
+    </div>
+  </details>
+
+  <div id="chat-messages" class="chat-messages">
+    {% include "market_analyst/_messages.html" %}
+  </div>
+
+  <form id="chat-send-form" class="chat-input-row"
+        hx-post="/analyst/send" hx-target="#chat-messages" hx-swap="beforeend"
+        hx-on::after-request="this.reset(); document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight">
+    <textarea name="message" placeholder="Попитай нещо… (напр. „сравни кварталите на София за двустайни“, „времеви ред за офиси“)" required
+              onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); this.closest('form').requestSubmit();}"></textarea>
+    <input type="hidden" name="provider_model" id="chat-provider-model-hidden">
+    <input type="hidden" name="temperature" id="param-temperature-hidden">
+    <input type="hidden" name="top_p" id="param-top_p-hidden">
+    <input type="hidden" name="top_k" id="param-top_k-hidden">
+    <input type="hidden" name="frequency_penalty" id="param-frequency_penalty-hidden">
+    <input type="hidden" name="presence_penalty" id="param-presence_penalty-hidden">
+    <input type="hidden" name="seed" id="param-seed-hidden">
+    <input type="hidden" name="max_output_tokens" id="param-max_output_tokens-hidden">
+    <input type="hidden" name="max_tool_iterations" id="param-max_tool_iterations-hidden">
+    <button type="submit" class="btn-primary">Изпрати</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  var CAPS = {{ sampling_capabilities | tojson }};
+
+  var sel = document.getElementById('chat-provider-model');
+  var hidden = document.getElementById('chat-provider-model-hidden');
+  function currentProvider() { return (sel.value || '').split(':')[0]; }
+  function syncProviderModel() { hidden.value = sel.value || ''; }
+
+  var PARAMS = ['temperature', 'top_p', 'top_k', 'frequency_penalty', 'presence_penalty', 'seed', 'max_output_tokens', 'max_tool_iterations'];
+  var els = {};
+  PARAMS.forEach(function (name) {
+    els[name] = {
+      input: document.getElementById('param-' + name),
+      hidden: document.getElementById('param-' + name + '-hidden'),
+      val: document.getElementById('param-' + name + '-val'),
+      cell: document.querySelector('.param-cell[data-param="' + name + '"]'),
+    };
+  });
+
+  function syncParam(name) {
+    var e = els[name];
+    if (!e.input) return;
+    if (e.input.disabled) { e.hidden.value = ''; return; }
+    e.hidden.value = e.input.value;
+    if (e.val) e.val.textContent = e.input.value;
+  }
+
+  function applyCapabilities() {
+    var provider = currentProvider();
+    var caps = CAPS[provider] || CAPS['openai'];
+    if (!caps) return;
+
+    var tempInput = els.temperature.input;
+    tempInput.min = caps.temperature.min;
+    tempInput.max = caps.temperature.max;
+    if (parseFloat(tempInput.value) > caps.temperature.max) tempInput.value = caps.temperature.max;
+
+    ['top_k', 'frequency_penalty', 'presence_penalty', 'seed'].forEach(function (name) {
+      var supported = caps[name] && caps[name].supported;
+      var e = els[name];
+      if (!e.input) return;
+      e.input.disabled = !supported;
+      if (e.cell) e.cell.classList.toggle('param-disabled', !supported);
+    });
+
+    PARAMS.forEach(syncParam);
+  }
+
+  PARAMS.forEach(function (name) {
+    var e = els[name];
+    if (!e.input) return;
+    e.input.addEventListener('input', function () { syncParam(name); });
+  });
+
+  sel.addEventListener('change', function () { syncProviderModel(); applyCapabilities(); });
+  syncProviderModel();
+  applyCapabilities();
+
+  var box = document.getElementById('chat-messages');
+  if (box) box.scrollTop = box.scrollHeight;
+})();
+</script>
+{% endblock %}
