@@ -31,7 +31,7 @@ from app.db.models import AgentConversation, AgentLlmCall, AgentMessage, Apprais
 from app.services.llm.orchestrator_graph import build_orchestrator_graph
 from app.services.llm.providers import build_sampling_kwargs, estimate_cost_usd, resolve_chat_model
 
-MAX_OUTPUT_TOKENS = 2000
+MAX_OUTPUT_TOKENS = 3000
 MAX_TOOL_ITERATIONS = 6
 
 # Hard bounds for the chat console's user-facing max-reply-length / max-
@@ -41,6 +41,21 @@ MAX_TOOL_ITERATIONS = 6
 MIN_OUTPUT_TOKENS = 200
 MAX_OUTPUT_TOKENS_HARD_CAP = 8000
 MAX_TOOL_ITERATIONS_HARD_CAP = 12
+
+# Trailing-window cap on how much conversation history is actually sent to
+# the model (Phase 12, 2026-08-31) -- found live that a conversation left
+# to grow indefinitely (the pre-Phase-12 "one eternal thread" design) can
+# reach 25k+ input tokens by turn 5-6, at which point the model routinely
+# wants to write a longer answer than MAX_OUTPUT_TOKENS allows and gets cut
+# off mid-sentence (see is_length_truncated). Starting new named
+# conversations (new_conversation) is the primary fix -- a fresh topic
+# gets a small context again -- this is just the safety net for a single
+# conversation that still runs long. Deliberately a simple trailing count,
+# not token-counting or LLM-based summarization: cheap, deterministic, and
+# good enough as a first cut. Only affects what the MODEL sees -- the UI's
+# own message list (_conversation_context in the routers) always shows the
+# full history regardless.
+MAX_HISTORY_MESSAGES = 40
 
 
 @dataclass
@@ -73,6 +88,63 @@ def get_or_create_conversation(db: Session, report_id, user_id: int, agent_type:
     return conv
 
 
+def new_conversation(db: Session, user_id: int, agent_type: str = "report_assistant", report_id=None) -> AgentConversation:
+    """Always creates a fresh, separate conversation -- unlike get_or_create_
+    conversation, which deliberately reuses the latest existing one. This is
+    the one operation that was actually missing (Phase 12, 2026-08-31): the
+    schema already supported multiple conversations per (user, agent_type,
+    report_id), nothing here reuses or archives the old thread -- it just
+    stays there, reachable via list_conversations()."""
+    conv = AgentConversation(report_id=report_id, user_id=user_id, agent_type=agent_type)
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+def list_conversations(db: Session, user_id: int, agent_type: str = "report_assistant", report_id=None) -> list[AgentConversation]:
+    """All of a user's conversations in this scope, most-recently-updated
+    first -- backs the conversation switcher dropdown. Same (user_id,
+    agent_type, report_id) filter shape as get_or_create_conversation,
+    backed by the composite index added alongside this function."""
+    query = db.query(AgentConversation).filter(
+        AgentConversation.user_id == user_id, AgentConversation.agent_type == agent_type,
+    )
+    if report_id is not None:
+        query = query.filter(AgentConversation.report_id == report_id)
+    return query.order_by(AgentConversation.updated_at.desc()).all()
+
+
+def get_conversation_for_user(db: Session, conversation_id, user_id: int) -> AgentConversation | None:
+    """Ownership-checked lookup by id -- the ownership-check building block
+    for _active_conversation()-style session resolution in the routers,
+    mirroring comparable_service.get_report_for_user's role for reports."""
+    return (
+        db.query(AgentConversation)
+        .filter(AgentConversation.id == conversation_id, AgentConversation.user_id == user_id)
+        .first()
+    )
+
+
+def _trim_history(messages: list, max_messages: int = MAX_HISTORY_MESSAGES) -> list:
+    """Keeps only the most recent `max_messages` -- see MAX_HISTORY_MESSAGES's
+    own docstring for why. A no-op for any conversation shorter than the cap,
+    which is the overwhelming majority of real conversations.
+
+    A plain tail slice can cut a conversation between a tool-calling
+    AIMessage and its ToolMessage result(s) -- the AIMessage falls before
+    the cut, its result(s) after it, leaving one or more dangling
+    ToolMessages with no matching tool_call in view. Every provider's API
+    rejects that shape (an orphaned tool result), so any leading
+    ToolMessages are additionally dropped from the trimmed slice."""
+    if len(messages) <= max_messages:
+        return messages
+    trimmed = messages[-max_messages:]
+    while trimmed and isinstance(trimmed[0], ToolMessage):
+        trimmed = trimmed[1:]
+    return trimmed
+
+
 def _load_langchain_messages(db: Session, conversation_id) -> list:
     rows = (
         db.query(AgentMessage)
@@ -88,7 +160,7 @@ def _load_langchain_messages(db: Session, conversation_id) -> list:
             messages.append(AIMessage(content=row.content or "", tool_calls=row.tool_calls or []))
         elif row.role == "tool":
             messages.append(ToolMessage(content=row.content or "", tool_call_id=row.tool_call_id))
-    return messages
+    return _trim_history(messages)
 
 
 def _documents_note(db: Session, report_id) -> str:
@@ -119,10 +191,11 @@ def _documents_note(db: Session, report_id) -> str:
 
 
 def _persist_message(db: Session, conversation_id, role: str, content: str | None = None,
-                      tool_calls: list | None = None, tool_call_id: str | None = None) -> AgentMessage:
+                      tool_calls: list | None = None, tool_call_id: str | None = None,
+                      truncated: bool = False) -> AgentMessage:
     msg = AgentMessage(
         conversation_id=conversation_id, role=role, content=content,
-        tool_calls=tool_calls, tool_call_id=tool_call_id,
+        tool_calls=tool_calls, tool_call_id=tool_call_id, truncated=truncated,
     )
     db.add(msg)
     db.commit()
@@ -213,8 +286,8 @@ def run_assistant_turn(
         progress.step = step
         emit()
 
-    def on_message_cb(role: str, content: str | None, tool_calls: list | None, tool_call_id: str | None) -> None:
-        _persist_message(db, conversation.id, role, content=content, tool_calls=tool_calls, tool_call_id=tool_call_id)
+    def on_message_cb(role: str, content: str | None, tool_calls: list | None, tool_call_id: str | None, truncated: bool = False) -> None:
+        _persist_message(db, conversation.id, role, content=content, tool_calls=tool_calls, tool_call_id=tool_call_id, truncated=truncated)
 
     graph = build_orchestrator_graph(
         db=db, report=report, documents_note=_documents_note(db, report.id),

@@ -25,10 +25,10 @@ from sqlalchemy.orm import Session
 from app.db.models import AgentConversation, AgentMessage
 from app.services.llm.analyst_tools import build_analyst_tools
 from app.services.llm.assistant_chain import ChatProgress, _load_langchain_messages, _persist_call_log, _persist_message
-from app.services.llm.providers import build_sampling_kwargs, get_chat_model, resolve_chat_model
+from app.services.llm.providers import build_sampling_kwargs, get_chat_model, is_length_truncated, resolve_chat_model
 from app.services.llm.valuation_chain import _extract_text
 
-MAX_OUTPUT_TOKENS = 2000
+MAX_OUTPUT_TOKENS = 3000
 MAX_TOOL_ITERATIONS = 6
 MIN_OUTPUT_TOKENS = 200
 MAX_OUTPUT_TOKENS_HARD_CAP = 8000
@@ -63,12 +63,30 @@ _SYSTEM_PROMPT = """Ти си пазарен анализатор на недв�
 
 
 def get_or_create_analyst_conversation(db: Session, user_id: int) -> AgentConversation:
-    """One persistent market-analyst conversation per user (v1 -- same
-    "one thread" simplicity as the report assistant's v1, see
-    assistant_chain.get_or_create_conversation, just keyed by
-    (user, agent_type) instead of (user, report))."""
+    """Fallback conversation resolution when no conversation is explicitly
+    selected in session -- reuses the latest existing one (or creates the
+    first), same as assistant_chain.get_or_create_conversation, just keyed
+    by (user, agent_type) instead of (user, report). Since Phase 12
+    (2026-08-31) a user can have MULTIPLE market-analyst conversations --
+    see new_analyst_conversation/list_analyst_conversations below -- this
+    is only the "nothing selected yet" default, not the only thread."""
     from app.services.llm.assistant_chain import get_or_create_conversation
     return get_or_create_conversation(db, report_id=None, user_id=user_id, agent_type="market_analyst")
+
+
+def new_analyst_conversation(db: Session, user_id: int) -> AgentConversation:
+    """Always starts a fresh, separate market-analyst conversation --
+    thin wrapper over assistant_chain.new_conversation, kept here so
+    callers (market_analyst.py) never need to know agent_type="market_analyst"
+    is the right string to pass."""
+    from app.services.llm.assistant_chain import new_conversation
+    return new_conversation(db, user_id, agent_type="market_analyst")
+
+
+def list_analyst_conversations(db: Session, user_id: int) -> list[AgentConversation]:
+    """All of a user's market-analyst conversations, for the switcher."""
+    from app.services.llm.assistant_chain import list_conversations
+    return list_conversations(db, user_id, agent_type="market_analyst")
 
 
 def run_analyst_turn(
@@ -153,7 +171,7 @@ def run_analyst_turn(
 
             if not response.tool_calls:
                 final_text = _extract_text(response.content)
-                _persist_message(db, conversation.id, "assistant", content=final_text)
+                _persist_message(db, conversation.id, "assistant", content=final_text, truncated=is_length_truncated(response))
                 break
 
             _persist_message(

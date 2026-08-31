@@ -11,8 +11,8 @@ import logging
 import threading
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -22,7 +22,11 @@ from app.dependencies import require_auth as get_current_user
 from app.rate_limit import limiter
 from app.services import market_documents as market_documents_service
 from app.services.llm import chat_store
-from app.services.llm.analyst_chain import ChatProgress, get_or_create_analyst_conversation, run_analyst_turn
+from app.services.llm.analyst_chain import (
+    ChatProgress, get_or_create_analyst_conversation, list_analyst_conversations,
+    new_analyst_conversation, run_analyst_turn,
+)
+from app.services.llm.assistant_chain import get_conversation_for_user
 from app.services.llm.providers import get_default_model, get_sampling_capabilities, list_available_models, list_configured_providers
 from app.templating import templates
 
@@ -45,7 +49,7 @@ def _conversation_context(db: Session, conversation: AgentConversation) -> dict:
     )
     messages = []
     for row in rows:
-        item = {"role": row.role, "content": row.content, "tool_calls": row.tool_calls, "created_at": row.created_at}
+        item = {"role": row.role, "content": row.content, "tool_calls": row.tool_calls, "created_at": row.created_at, "truncated": row.truncated}
         if row.role == "tool" and row.content:
             try:
                 item["parsed"] = json.loads(row.content)
@@ -70,19 +74,39 @@ def _conversation_context(db: Session, conversation: AgentConversation) -> dict:
     }
 
 
+def _active_analyst_conversation(request: Request, db: Session, user: User) -> AgentConversation:
+    """Session-selected market-analyst conversation (Phase 12, 2026-08-31)
+    -- mirrors assistant.py's _active_conversation, minus the report
+    re-validation (this agent has no report to re-check against)."""
+    cid_str = request.session.get("active_analyst_conversation_id")
+    if cid_str:
+        try:
+            conv = get_conversation_for_user(db, uuid.UUID(cid_str), user.id)
+            if conv and conv.agent_type == "market_analyst":
+                return conv
+        except Exception:
+            pass
+    conv = get_or_create_analyst_conversation(db, user.id)
+    request.session["active_analyst_conversation_id"] = str(conv.id)
+    return conv
+
+
 @router.get("/", response_class=HTMLResponse)
 async def analyst_page(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    conversation = get_or_create_analyst_conversation(db, user.id)
+    conversation = _active_analyst_conversation(request, db, user)
     ctx = _conversation_context(db, conversation)
     docs = db.query(MarketDocument).order_by(MarketDocument.created_at.desc()).all()
     return templates.TemplateResponse(
         request, "market_analyst.html",
         {
             "conversation": conversation,
+            "conversations": list_analyst_conversations(db, user.id),
+            "conversation_open_url_prefix": "/analyst/conversations",
+            "conversation_new_url": "/analyst/conversations/new",
             "configured_providers": list_configured_providers(),
             "default_provider": settings.llm_default_provider,
             "default_model": get_default_model(settings.llm_default_provider),
@@ -93,6 +117,31 @@ async def analyst_page(
             **ctx,
         },
     )
+
+
+@router.post("/conversations/new")
+async def new_conversation_route(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conv = new_analyst_conversation(db, user.id)
+    request.session["active_analyst_conversation_id"] = str(conv.id)
+    return RedirectResponse(url="/analyst/", status_code=303)
+
+
+@router.post("/conversations/{conversation_id}/open")
+async def open_conversation_route(
+    conversation_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conv = get_conversation_for_user(db, conversation_id, user.id)
+    if not conv or conv.agent_type != "market_analyst":
+        raise HTTPException(status_code=404)
+    request.session["active_analyst_conversation_id"] = str(conv.id)
+    return RedirectResponse(url="/analyst/", status_code=303)
 
 
 def _run_turn(
@@ -150,7 +199,7 @@ async def send_message(
     if not message:
         return HTMLResponse("", status_code=204)
 
-    conversation = get_or_create_analyst_conversation(db, user.id)
+    conversation = _active_analyst_conversation(request, db, user)
 
     provider, _, model = provider_model.partition(":")
     provider, model = (provider or None), (model or None)
@@ -221,7 +270,7 @@ async def messages_partial(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    conversation = get_or_create_analyst_conversation(db, user.id)
+    conversation = _active_analyst_conversation(request, db, user)
     ctx = _conversation_context(db, conversation)
     return templates.TemplateResponse(request, "market_analyst/_messages.html", ctx)
 

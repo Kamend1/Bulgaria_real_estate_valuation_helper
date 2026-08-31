@@ -3,7 +3,7 @@ import uuid
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger, Boolean, Column, Date, ForeignKey,
-    Integer, Numeric, SmallInteger, String, Text,
+    Index, Integer, Numeric, SmallInteger, String, Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -427,8 +427,19 @@ class AgentConversation(Base):
     - "market_analyst" -- report_id is NULL; one persistent conversation
       per user for free-form market research (time series, segment/geo/
       construction-type cross-sections) across the whole listings corpus,
-      not tied to any one case."""
+      not tied to any one case.
+
+    Phase 12 (2026-08-31): a user can now have MULTIPLE conversations per
+    (user_id, agent_type, report_id) -- get_or_create_conversation() still
+    picks "the latest" as a fallback, but new_conversation() lets the
+    appraiser start a fresh, separate thread (see assistant_chain.py). The
+    composite index below backs list_conversations()'s switcher query,
+    which never mattered before this -- the old "always reuse the single
+    row" pattern never listed more than one."""
     __tablename__ = "agent_conversations"
+    __table_args__ = (
+        Index("ix_agent_conversations_user_agent_report", "user_id", "agent_type", "report_id"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=True, index=True)
@@ -446,7 +457,15 @@ class AgentMessage(Base):
     """One turn in an AgentConversation -- enough to reconstruct the
     LangChain message list on the next turn (role/content, plus tool_calls
     for an assistant message that called tools, or tool_call_id for the
-    matching tool-result message)."""
+    matching tool-result message).
+
+    truncated (Phase 12, 2026-08-31): set on an assistant message whose
+    text was cut short by the provider's max-tokens ceiling (detected via
+    finish_reason/stop_reason, see providers.is_length_truncated) --
+    lets the UI show an explicit "response was cut off" warning instead of
+    silently treating a truncated answer as a complete one. Deliberately a
+    real column, not a string sentinel appended to content -- queryable,
+    and never risks colliding with real model output."""
     __tablename__ = "agent_messages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -455,6 +474,7 @@ class AgentMessage(Base):
     content = Column(Text)
     tool_calls = Column(JSONB)            # [{id, name, args}]
     tool_call_id = Column(Text)
+    truncated = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     conversation = relationship("AgentConversation", back_populates="messages")

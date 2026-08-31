@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AppraisalReport, MarketDocument
 from app.services.llm import critic_graph
 from app.services.llm.analyst_tools import build_analyst_tools
-from app.services.llm.providers import get_chat_model
+from app.services.llm.providers import get_chat_model, is_length_truncated
 from app.services.llm.tools import (
     _income_valuation_description,
     _income_valuation_fn,
@@ -53,10 +53,13 @@ from app.services.llm.tools import (
 from app.services.llm.valuation_chain import _extract_text
 from app.services.market_documents import LEGAL_DOCUMENT_TYPE
 
-# OnMessage persists one message (role, content, tool_calls, tool_call_id)
-# -- assistant_chain._persist_message's exact signature shape, passed in as
-# a callback so this module never touches the DB/conversation_id directly.
-OnMessage = Callable[[str, str | None, list | None, str | None], None]
+# OnMessage persists one message (role, content, tool_calls, tool_call_id,
+# truncated) -- assistant_chain._persist_message's exact signature shape,
+# passed in as a callback so this module never touches the DB/
+# conversation_id directly. `truncated` (Phase 12, 2026-08-31) flags an
+# assistant answer that was cut short by the provider's max-tokens ceiling
+# -- see is_length_truncated.
+OnMessage = Callable[[str, str | None, list | None, str | None, bool], None]
 OnProgress = Callable[[str], None]
 
 _SPECIALIST_DISPLAY_NAMES = {
@@ -136,10 +139,10 @@ def _build_tool_loop(
 
             if not response.tool_calls:
                 final_text = _extract_text(response.content)
-                on_message("assistant", final_text, None, None)
+                on_message("assistant", final_text, None, None, is_length_truncated(response))
                 break
 
-            on_message("assistant", _extract_text(response.content) or None, response.tool_calls, None)
+            on_message("assistant", _extract_text(response.content) or None, response.tool_calls, None, False)
             for call in response.tool_calls:
                 on_progress(f"Изпълнявам: {call['name']}…")
                 tool = tools_by_name.get(call["name"])

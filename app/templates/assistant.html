@@ -52,6 +52,7 @@
       {% if draft_reports|length > 1 %}
       &nbsp;·&nbsp; {% include "_report_switcher.html" %}
       {% endif %}
+      &nbsp;·&nbsp; {% include "_conversation_switcher.html" %}
     </p>
   </div>
 
@@ -135,7 +136,7 @@
   <form id="chat-send-form" class="chat-input-row"
         hx-post="/assistant/send" hx-target="#chat-messages" hx-swap="beforeend"
         hx-on::after-request="this.reset(); document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight">
-    <textarea name="message" placeholder="Попитай нещо… (напр. „покажи ми наемни сравними“, „напиши описание на имота“)" required
+    <textarea name="message" id="chat-message-input" placeholder="Попитай нещо… (напр. „покажи ми наемни сравними“, „напиши описание на имота“)" required
               onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); this.closest('form').requestSubmit();}"></textarea>
     <input type="hidden" name="provider_model" id="chat-provider-model-hidden">
     <input type="hidden" name="temperature" id="param-temperature-hidden">

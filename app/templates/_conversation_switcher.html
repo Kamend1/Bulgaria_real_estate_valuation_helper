@@ -1,0 +1,32 @@
+{# Chat-conversation switcher (Phase 12, 2026-08-31) -- lets the appraiser
+   start a new, separate chat thread and switch between existing ones,
+   instead of being stuck with the single ever-growing conversation from
+   before this phase. Shared between /assistant/ and /analyst/ (mirrors
+   _report_switcher.html's shape) -- included with `conversations`
+   (list[AgentConversation]), `conversation` (the currently active one),
+   `conversation_open_url_prefix` (e.g. "/assistant/conversations" or
+   "/analyst/conversations"), and `conversation_new_url` in context.
+   Shared documents (report_documents/market_documents) are scoped by
+   report_id/globally, never by conversation_id -- switching conversation
+   here never hides or changes which documents are visible. #}
+<span style="display:inline-flex;align-items:center;gap:0.35rem;flex-wrap:wrap">
+  <span class="hint">Чат:</span>
+  {% if conversations|length > 1 %}
+  <form action="{{ conversation_open_url_prefix }}/{{ conversation.id }}/open" method="post"
+        style="display:inline-flex;align-items:center">
+    <select title="Превключи чат" class="income-label" style="padding:0.25rem"
+            onchange="this.form.action = '{{ conversation_open_url_prefix }}/' + this.value + '/open'; this.form.submit()">
+      {% for c in conversations %}
+      <option value="{{ c.id }}" {% if c.id == conversation.id %}selected{% endif %}>
+        {{ c.title or ('Чат от ' ~ c.created_at.strftime('%d.%m.%Y %H:%M')) }}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+  {% else %}
+  <span>{{ conversation.title or ('Чат от ' ~ conversation.created_at.strftime('%d.%m.%Y %H:%M')) }}</span>
+  {% endif %}
+  <form action="{{ conversation_new_url }}" method="post" style="display:inline">
+    <button type="submit" class="btn-secondary btn-sm" title="Започни нов, отделен чат">+ Нов чат</button>
+  </form>
+</span>

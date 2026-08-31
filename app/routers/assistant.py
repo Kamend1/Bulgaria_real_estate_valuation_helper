@@ -9,8 +9,8 @@ import re
 import threading
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -22,7 +22,10 @@ from app.routers.comparables import _active_report
 from app.services import documents as documents_service
 from app.services.comparable_service import get_draft_reports_for_user, update_income_market_rationale, update_submarket_rationale, update_subject
 from app.services.llm import chat_store
-from app.services.llm.assistant_chain import ChatProgress, get_or_create_conversation, run_assistant_turn
+from app.services.llm.assistant_chain import (
+    ChatProgress, get_conversation_for_user, get_or_create_conversation,
+    list_conversations, new_conversation, run_assistant_turn,
+)
 from app.services.llm.providers import get_default_model, get_sampling_capabilities, list_available_models, list_configured_providers
 from app.templating import templates
 
@@ -75,7 +78,7 @@ def _conversation_context(db: Session, conversation: AgentConversation) -> dict:
     )
     messages = []
     for row in rows:
-        item = {"role": row.role, "content": row.content, "tool_calls": row.tool_calls, "created_at": row.created_at}
+        item = {"role": row.role, "content": row.content, "tool_calls": row.tool_calls, "created_at": row.created_at, "truncated": row.truncated}
         if row.role == "tool" and row.content:
             try:
                 item["parsed"] = json.loads(row.content)
@@ -100,6 +103,27 @@ def _conversation_context(db: Session, conversation: AgentConversation) -> dict:
     }
 
 
+def _active_conversation(request: Request, db: Session, user: User, report) -> AgentConversation:
+    """Session-selected conversation for the report-scoped assistant
+    (Phase 12, 2026-08-31) -- mirrors comparables._active_report's shape
+    exactly: read session id -> ownership check -> fallback + write back.
+    Also re-validated against the CURRENTLY active report: if the
+    appraiser switches reports via _report_switcher.html, a conversation
+    id left over from the previous report is no longer a valid choice and
+    falls back to that new report's own default conversation instead."""
+    cid_str = request.session.get("active_assistant_conversation_id")
+    if cid_str:
+        try:
+            conv = get_conversation_for_user(db, uuid.UUID(cid_str), user.id)
+            if conv and conv.agent_type == "report_assistant" and conv.report_id == report.id:
+                return conv
+        except Exception:
+            pass
+    conv = get_or_create_conversation(db, report.id, user.id)
+    request.session["active_assistant_conversation_id"] = str(conv.id)
+    return conv
+
+
 @router.get("/", response_class=HTMLResponse)
 async def assistant_page(
     request: Request,
@@ -107,7 +131,7 @@ async def assistant_page(
     user: User = Depends(get_current_user),
 ):
     report = _active_report(request, db, user)
-    conversation = get_or_create_conversation(db, report.id, user.id)
+    conversation = _active_conversation(request, db, user, report)
     ctx = _conversation_context(db, conversation)
     docs = _sorted_documents(db, report.id)
     return templates.TemplateResponse(
@@ -115,6 +139,9 @@ async def assistant_page(
         {
             "report": report,
             "conversation": conversation,
+            "conversations": list_conversations(db, user.id, agent_type="report_assistant", report_id=report.id),
+            "conversation_open_url_prefix": "/assistant/conversations",
+            "conversation_new_url": "/assistant/conversations/new",
             "configured_providers": list_configured_providers(),
             "default_provider": settings.llm_default_provider,
             "default_model": get_default_model(settings.llm_default_provider),
@@ -127,6 +154,37 @@ async def assistant_page(
             **ctx,
         },
     )
+
+
+@router.post("/conversations/new")
+async def new_conversation_route(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    report = _active_report(request, db, user)
+    conv = new_conversation(db, user.id, agent_type="report_assistant", report_id=report.id)
+    request.session["active_assistant_conversation_id"] = str(conv.id)
+    return RedirectResponse(url="/assistant/", status_code=303)
+
+
+@router.post("/conversations/{conversation_id}/open")
+async def open_conversation_route(
+    conversation_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conv = get_conversation_for_user(db, conversation_id, user.id)
+    if not conv or conv.agent_type != "report_assistant":
+        raise HTTPException(status_code=404)
+    request.session["active_assistant_conversation_id"] = str(conv.id)
+    # Keep the two selectors consistent -- opening a conversation that
+    # belongs to a different report than the currently active one also
+    # switches the active report, so /comparables/ and this page agree.
+    if conv.report_id:
+        request.session["active_report_id"] = str(conv.report_id)
+    return RedirectResponse(url="/assistant/", status_code=303)
 
 
 def _run_turn(
@@ -186,7 +244,7 @@ async def send_message(
         return HTMLResponse("", status_code=204)
 
     report = _active_report(request, db, user)
-    conversation = get_or_create_conversation(db, report.id, user.id)
+    conversation = _active_conversation(request, db, user, report)
 
     provider, _, model = provider_model.partition(":")
     provider, model = (provider or None), (model or None)
@@ -266,7 +324,7 @@ async def messages_partial(
     assistant/tool messages (incl. any proposal cards) without hand-rolling
     incremental DOM patching for a first version."""
     report = _active_report(request, db, user)
-    conversation = get_or_create_conversation(db, report.id, user.id)
+    conversation = _active_conversation(request, db, user, report)
     ctx = _conversation_context(db, conversation)
     return templates.TemplateResponse(request, "assistant/_messages.html", ctx)
 

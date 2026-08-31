@@ -40,6 +40,7 @@
       Свободен разговор с целия корпус обяви — времеви редове, сегментен анализ, наемен пазар,
       сравнения между квартали/градове/типове строителство. Не е обвързан с конкретен доклад.
     </p>
+    <p class="hint">{% include "_conversation_switcher.html" %}</p>
   </div>
 
   <details style="margin-bottom:0.6rem;border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem">
@@ -122,7 +123,7 @@
   <form id="chat-send-form" class="chat-input-row"
         hx-post="/analyst/send" hx-target="#chat-messages" hx-swap="beforeend"
         hx-on::after-request="this.reset(); document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight">
-    <textarea name="message" placeholder="Попитай нещо… (напр. „сравни кварталите на София за двустайни“, „времеви ред за офиси“)" required
+    <textarea name="message" id="chat-message-input" placeholder="Попитай нещо… (напр. „сравни кварталите на София за двустайни“, „времеви ред за офиси“)" required
               onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); this.closest('form').requestSubmit();}"></textarea>
     <input type="hidden" name="provider_model" id="chat-provider-model-hidden">
     <input type="hidden" name="temperature" id="param-temperature-hidden">

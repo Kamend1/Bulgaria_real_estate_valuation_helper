@@ -185,6 +185,30 @@ def resolve_chat_model(provider: str | None = None, model: str | None = None) ->
     return provider, model
 
 
+# Each provider's LangChain integration names its "cut off by the max-
+# tokens ceiling" signal differently -- centralized here (Phase 12,
+# 2026-08-31) so every chat loop checks the same thing after a streamed
+# response, instead of silently persisting a truncated answer as if it
+# were complete. Verified directly against the installed provider packages
+# (not assumed from docs): OpenAI's ChatOpenAI sets response_metadata
+# ["finish_reason"] = "length"; Anthropic's ChatAnthropic sets
+# response_metadata["stop_reason"] = "max_tokens"; Google's
+# ChatGoogleGenerativeAI sets response_metadata["finish_reason"] =
+# candidate.finish_reason.name, which is the literal string "MAX_TOKENS".
+_TRUNCATION_SIGNALS = {"length", "max_tokens", "MAX_TOKENS"}
+
+
+def is_length_truncated(response) -> bool:
+    """True if `response` (an AIMessage/AIMessageChunk with accumulated
+    response_metadata) was cut short by the provider's output-token
+    ceiling rather than reaching a natural stop. Call this on the final
+    step of a tool-calling loop (the one with no further tool_calls) --
+    that's the only place a truncated answer could be silently mistaken
+    for a finished one."""
+    meta = getattr(response, "response_metadata", None) or {}
+    return meta.get("finish_reason") in _TRUNCATION_SIGNALS or meta.get("stop_reason") in _TRUNCATION_SIGNALS
+
+
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int, provider: str | None = None) -> float | None:
     """Returns None (rather than 0) when the model isn't in the pricing
     table, so callers can distinguish "genuinely free" from "unknown

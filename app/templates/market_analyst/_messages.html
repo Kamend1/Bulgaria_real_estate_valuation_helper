@@ -21,6 +21,17 @@
   {% elif msg.role == "assistant" and msg.content %}
   <div class="chat-msg chat-msg-assistant">
     <div class="chat-bubble" style="white-space:pre-line">{{ msg.content }}</div>
+    {% if msg.truncated %}
+    <div class="alert alert-warn" style="margin-top:0.4rem">
+      Отговорът е прекъснат поради лимита за дължина на отговора, не е завършен.
+      Вдигни "Макс. дължина на отговора" в параметрите на модела за по-дълги отговори,
+      или
+      <button type="button" class="btn-secondary btn-sm"
+              onclick="document.getElementById('chat-message-input').value='Продължи точно откъдето спря.'; document.getElementById('chat-send-form').requestSubmit();">
+        Продължи
+      </button>
+    </div>
+    {% endif %}
   </div>
 
   {% elif msg.role == "assistant" and msg.tool_calls %}
