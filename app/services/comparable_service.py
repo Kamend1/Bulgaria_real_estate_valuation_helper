@@ -906,7 +906,8 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
 def get_or_create_draft(db: Session, user_id: int) -> AppraisalReport:
     draft = (
         db.query(AppraisalReport)
-        .filter(AppraisalReport.status == "draft", AppraisalReport.user_id == user_id)
+        .filter(AppraisalReport.status == "draft", AppraisalReport.user_id == user_id,
+                AppraisalReport.is_scratch.is_(False))
         .order_by(AppraisalReport.updated_at.desc())
         .first()
     )
@@ -919,13 +920,43 @@ def new_draft(db: Session, user_id: int) -> AppraisalReport:
     return _new_draft_obj(db, user_id)
 
 
+def new_scratch_draft(db: Session, user_id: int) -> AppraisalReport:
+    """A "hypothetical property" scenario (Phase 11, 2026-08-28) -- a
+    completely normal AppraisalReport (same subject/income/weighting
+    fields, same comparables/AVM/GIS panels, same AI assistant) except
+    is_scratch=True, which only affects visibility: hidden from
+    get_user_reports()'s default /reports/ list so exploratory scenarios
+    don't clutter real casework. promote_scratch_report() flips it back."""
+    draft = AppraisalReport(title="Хипотетичен сценарий", status="draft", user_id=user_id, is_scratch=True)
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return draft
+
+
+def promote_scratch_report(db: Session, report_id: uuid.UUID) -> None:
+    """"Направи истински доклад" -- the only effect is visibility in
+    get_user_reports()'s list; nothing else about the row changes."""
+    report = db.get(AppraisalReport, report_id)
+    if report:
+        report.is_scratch = False
+        db.commit()
+
+
 def get_draft_reports_for_user(db: Session, user_id: int) -> list[AppraisalReport]:
     """For the quick project-switcher on /comparables/ and /assistant/
     (2026-08-26) -- only the user's non-finalized reports, since "which
     draft am I working on" is the whole ask (finalized/exported reports are
     browsed from /reports/ instead). Lighter than get_user_reports (which
     joins comparable_pool for the full /reports/ table's sale/rent/pinned
-    counts) -- the switcher only needs id + a label."""
+    counts) -- the switcher only needs id + a label.
+
+    Deliberately INCLUDES scratch (hypothetical) reports (Phase 11,
+    2026-08-28), unlike get_user_reports() below -- the switcher is your
+    working set, not your case history, and a scratch scenario hidden from
+    both this AND /reports/ would be a dead end once it falls out of the
+    session's active_report_id (e.g. after switching to a real report and
+    back)."""
     return (
         db.query(AppraisalReport)
         .filter(AppraisalReport.user_id == user_id, AppraisalReport.status == "draft")
@@ -942,7 +973,7 @@ def _new_draft_obj(db: Session, user_id: int) -> AppraisalReport:
     return draft
 
 
-def get_user_reports(db: Session, user_id: int) -> list[dict]:
+def get_user_reports(db: Session, user_id: int, include_scratch: bool = False) -> list[dict]:
     rows = db.execute(text("""
         SELECT
             ar.id,
@@ -953,15 +984,17 @@ def get_user_reports(db: Session, user_id: int) -> list[dict]:
             ar.subject_address,
             ar.subject_city,
             ar.valuation_date,
+            ar.is_scratch,
             count(cp.id) FILTER (WHERE cp.comparable_type = 'sale') AS sale_count,
             count(cp.id) FILTER (WHERE cp.comparable_type = 'rent') AS rent_count,
             count(cp.id) FILTER (WHERE cp.pinned_for_report = true)  AS pinned_count
         FROM appraisal_reports ar
         LEFT JOIN comparable_pool cp ON cp.report_id = ar.id
         WHERE ar.user_id = :uid
+          AND (:include_scratch OR ar.is_scratch = false)
         GROUP BY ar.id
         ORDER BY ar.updated_at DESC
-    """), {"uid": user_id}).mappings().all()
+    """), {"uid": user_id, "include_scratch": include_scratch}).mappings().all()
     return [dict(r) for r in rows]
 
 

@@ -9,6 +9,9 @@
       {% if report.status == 'finalized' %}
         &nbsp;·&nbsp;<span class="badge badge-ok" style="font-size:0.7rem">финализиран</span>
       {% endif %}
+      {% if report.is_scratch %}
+        &nbsp;·&nbsp;<span class="badge badge-warn" style="font-size:0.7rem" title="Скрит от /reports/ по подразбиране">хипотетичен сценарий</span>
+      {% endif %}
       {% if draft_reports|length > 1 %}
         &nbsp;·&nbsp; {% include "_report_switcher.html" %}
       {% endif %}
@@ -28,7 +31,11 @@
       </svg>
       Word
     </a>
-    {% if report.status == 'draft' %}
+    {% if report.status == 'draft' and report.is_scratch %}
+    <form action="/reports/{{ report.id }}/promote" method="post">
+      <button type="submit" class="btn btn-primary" title="Прави сценария видим в „Всички доклади" -- нищо друго не се променя">Направи истински доклад</button>
+    </form>
+    {% elif report.status == 'draft' %}
     <form action="/reports/{{ report.id }}/finalize" method="post">
       <button type="submit" class="btn btn-primary">Финализирай</button>
     </form>

@@ -33,8 +33,16 @@ DOCUMENT_TYPE_LABELS = {
     "research_article": "Изследователска статия",
     "government_statistic": "Официална статистика (НСИ, БНБ и др.)",
     "news": "Новина / медийна публикация",
+    "legal_standard": "Правен/нормативен текст (закон, наредба, етичен кодекс)",
     "other": "Друго",
 }
+
+# legal_standard documents skip the compressed-facts extraction below --
+# a paraphrased 5-bullet summary of a statute is actively wrong for the
+# AppraiserLegalAgent (Phase 11), which needs to quote an exact чл./ал.,
+# not a bullet someone else summarized. These get their FULL text stored
+# verbatim in extracted_data["full_text"] instead -- see _extract_legal_metadata.
+LEGAL_DOCUMENT_TYPE = "legal_standard"
 
 
 class MarketDocumentFacts(BaseModel):
@@ -43,6 +51,13 @@ class MarketDocumentFacts(BaseModel):
     geographic_scope: str | None = Field(default=None, description="Географски обхват -- напр. София, национално, конкретен квартал")
     key_claims: list[str] = Field(default_factory=list, description="Конкретни твърдения/изводи от документа, всяко като отделно кратко твърдение")
     cited_figures: list[str] = Field(default_factory=list, description="Конкретни цифри/статистики, цитирани в документа, с достатъчно контекст (напр. '+8% ръст на цените в Лозенец за 2025 г.')")
+
+
+class LegalDocumentFacts(BaseModel):
+    title: str = Field(description="Официално заглавие на нормативния акт/документа (напр. 'Наредба № 1 от 14.02.2007 г.')")
+    issuing_body: str | None = Field(default=None, description="Издаващ/приемащ орган, ако е посочен в текста")
+    effective_date_or_period: str | None = Field(default=None, description="Дата на влизане в сила или период на действие, ако е посочен")
+    scope_summary: str = Field(description="Едно-две изречения какво урежда документът -- само за ориентация в списъка, не заместител на пълния текст")
 
 
 def storage_dir() -> Path:
@@ -75,6 +90,21 @@ def _extract_structured_facts(text: str, document_type: str, provider: str | Non
     return result.model_dump()
 
 
+def _extract_legal_metadata(text: str, provider: str | None, model: str | None) -> dict:
+    """Only pulls identifying metadata (title/issuer/date/one-line scope) via
+    LLM, from the document's opening -- the actual legal content is stored
+    verbatim by the caller, never paraphrased through this call."""
+    chat = get_chat_model(provider, model, max_tokens=500)
+    structured = chat.with_structured_output(LegalDocumentFacts)
+    system = (
+        "Извлечи само идентифициращите метаданни на този нормативен/правен документ "
+        "(заглавие, издаващ орган, дата, едноизреченско описание на обхвата). Не преразказвай "
+        "съдържанието -- пълният текст се пази отделно и дословно."
+    )
+    result = structured.invoke([SystemMessage(content=system), HumanMessage(content=text[:4000])])
+    return result.model_dump()
+
+
 def extract_document(db: Session, doc: MarketDocument, provider: str | None = None, model: str | None = None) -> None:
     """Runs the whole pipeline for one uploaded market document and
     persists the result. Synchronous/blocking -- call from a background
@@ -83,14 +113,17 @@ def extract_document(db: Session, doc: MarketDocument, provider: str | None = No
     try:
         raw_text = extract_native_text(file_path, doc.mime_type)
         if raw_text is not None:
-            facts = _extract_structured_facts(raw_text, doc.document_type, provider, model)
             method = "text"
         else:
-            ocr_text = ocr_via_vision(file_path, provider, model)
-            facts = _extract_structured_facts(ocr_text, doc.document_type, provider, model)
+            raw_text = ocr_via_vision(file_path, provider, model)
             method = "ocr_vision"
+
+        if doc.document_type == LEGAL_DOCUMENT_TYPE:
+            metadata = _extract_legal_metadata(raw_text, provider, model)
+            doc.extracted_data = {**metadata, "full_text": raw_text}
+        else:
+            doc.extracted_data = _extract_structured_facts(raw_text, doc.document_type, provider, model)
         doc.extraction_method = method
-        doc.extracted_data = facts
         doc.status = "ready"
     except Exception as exc:
         doc.status = "failed"

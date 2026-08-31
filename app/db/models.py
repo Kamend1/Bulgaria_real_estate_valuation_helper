@@ -191,6 +191,13 @@ class AppraisalReport(Base):
     # market_opinion | fair_value_ifrs | noncash_contribution -- selects which
     # front-matter boilerplate (purpose/standard-of-value text) generate_docx()
     # uses; see comparable_service._PURPOSE_TEXTS.
+    is_scratch = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Phase 11, 2026-08-28: a "hypothetical property" scenario -- a normal
+    # AppraisalReport in every respect (gets every subject/income/weighting
+    # field and the full comparables/AI-assistant toolset for free), just
+    # hidden from /reports/'s default list so exploratory scenarios don't
+    # clutter real casework. "Направи истински доклад" flips this to False;
+    # nothing else about the row changes on promotion.
 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     owner = relationship("User", back_populates="reports")

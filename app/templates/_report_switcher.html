@@ -15,7 +15,7 @@
           onchange="this.form.action = '/reports/' + this.value + '/open'; this.form.submit()">
     {% for r in draft_reports %}
     <option value="{{ r.id }}" {% if r.id == report.id %}selected{% endif %}>
-      {{ r.subject_address or r.subject_city or r.title or ('Чернова от ' ~ r.created_at.strftime('%d.%m.%Y')) }}
+      {% if r.is_scratch %}🧪 {% endif %}{{ r.subject_address or r.subject_city or r.title or ('Чернова от ' ~ r.created_at.strftime('%d.%m.%Y')) }}
     </option>
     {% endfor %}
   </select>

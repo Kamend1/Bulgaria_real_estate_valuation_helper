@@ -14,6 +14,8 @@ from app.services.comparable_service import (
     get_report_for_user,
     get_user_reports,
     new_draft,
+    new_scratch_draft,
+    promote_scratch_report,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -31,13 +33,14 @@ async def reports_list(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    show_scratch: bool = False,
 ):
-    reports = get_user_reports(db, user.id)
+    reports = get_user_reports(db, user.id, include_scratch=show_scratch)
     active_rid = request.session.get("active_report_id")
     return templates.TemplateResponse(
         request,
         "reports.html",
-        {"reports": reports, "active_report_id": active_rid},
+        {"reports": reports, "active_report_id": active_rid, "show_scratch": show_scratch},
     )
 
 
@@ -118,4 +121,36 @@ async def new_report(
 ):
     report = new_draft(db, user.id)
     request.session["active_report_id"] = str(report.id)
+    return RedirectResponse(url="/comparables/", status_code=303)
+
+
+@router.post("/new-scratch")
+async def new_scratch_report(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """"Нов хипотетичен сценарий" (Phase 11, 2026-08-28) -- a normal draft
+    report, just hidden from the default /reports/ list (see
+    new_scratch_draft's own docstring). Lands on /comparables/ exactly like
+    a real new report -- every panel (subject, AVM, GIS, income, AI
+    Assistant) works on it unchanged."""
+    report = new_scratch_draft(db, user.id)
+    request.session["active_report_id"] = str(report.id)
+    return RedirectResponse(url="/comparables/", status_code=303)
+
+
+@router.post("/{report_id}/promote")
+async def promote_report(
+    report_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """"Направи истински доклад" -- flips is_scratch off so the scenario
+    now shows up in the normal /reports/ list. Nothing else changes."""
+    report = get_report_for_user(db, report_id, user.id)
+    if not report:
+        raise HTTPException(status_code=404)
+    promote_scratch_report(db, report_id)
     return RedirectResponse(url="/comparables/", status_code=303)

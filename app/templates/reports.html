@@ -2,12 +2,25 @@
 {% block title %}Моите доклади — Дигитален асистент на имотния оценител{% endblock %}
 
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap;gap:0.5rem">
   <h1>Моите доклади</h1>
-  <form action="/reports/new" method="post">
-    <button class="btn-primary">+ Нов доклад</button>
-  </form>
+  <div style="display:flex;gap:0.5rem;align-items:center">
+    <form action="/reports/new-scratch" method="post">
+      <button class="btn-outline" title="Разговор за хипотетичен имот -- пълния инструментариум (доходен подход, сравними, AI Асистент), без да се появява тук по подразбиране">+ Хипотетичен сценарий</button>
+    </form>
+    <form action="/reports/new" method="post">
+      <button class="btn-primary">+ Нов доклад</button>
+    </form>
+  </div>
 </div>
+
+<p class="hint" style="margin-bottom:1rem">
+  {% if show_scratch %}
+  <a href="/reports/">Скрий хипотетичните сценарии</a>
+  {% else %}
+  <a href="/reports/?show_scratch=true">Покажи и хипотетичните сценарии</a>
+  {% endif %}
+</p>
 
 {% if not reports %}
 <div class="empty-state" style="padding:3rem 2rem;text-align:center">
@@ -41,6 +54,7 @@
         <td>
           <span class="report-title">{{ r.title }}</span>
           {% if is_active %}<span class="badge badge-active">активен</span>{% endif %}
+          {% if r.is_scratch %}<span class="badge badge-warn" title="Хипотетичен сценарий -- скрит от този списък по подразбиране">хипотетичен</span>{% endif %}
         </td>
         <td class="sub-text">
           {% if r.subject_address %}{{ r.subject_address }}{% endif %}
@@ -73,9 +87,15 @@
               <form action="/reports/{{ r.id }}/open" method="post">
                 <button class="btn-primary btn-sm">Отвори</button>
               </form>
+              {% if r.is_scratch %}
+              <form action="/reports/{{ r.id }}/promote" method="post">
+                <button class="btn-outline btn-sm">Направи истински доклад</button>
+              </form>
+              {% else %}
               <form action="/reports/{{ r.id }}/finalize" method="post">
                 <button class="btn-outline btn-sm">Финализирай</button>
               </form>
+              {% endif %}
             {% else %}
               <form action="/reports/{{ r.id }}/open" method="post">
                 <button class="btn-outline btn-sm">Преглед</button>

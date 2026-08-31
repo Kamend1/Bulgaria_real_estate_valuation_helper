@@ -1,13 +1,18 @@
-"""Conversational multi-agent chat console (Tier 2, 2026-08-26).
+"""Conversational multi-agent chat console (Tier 2, 2026-08-26; re-platformed
+onto a LangGraph supervisor in Phase 11, 2026-08-28).
 
-Generalizes valuation_chain.py's one-shot streaming tool-calling loop into
-a persisted, multi-turn conversation: same streaming-for-live-progress
-pattern, same "numbers come from tools, never model arithmetic" guardrail,
-same per-call token/cost ledger (agent_llm_calls, via conversation_id this
-time instead of ai_valuation_run_id) -- but now scoped to an ongoing chat
-instead of a single generate-and-done call.
+Persisted, multi-turn conversation scoped to one AppraisalReport (real or
+is_scratch=True hypothetical -- identical treatment, see is_scratch's own
+docstring). The actual tool-calling work now happens inside
+orchestrator_graph.py's Supervisor + specialist nodes (income/market/
+market_analysis/legal/auditor) -- this module owns everything AROUND that:
+conversation/message persistence, the per-call token/cost ledger
+(agent_llm_calls), and the live SSE progress callback. Mirrors
+valuation_chain.py's streaming-for-live-progress pattern and "numbers come
+from tools, never model arithmetic" guardrail, same as before Phase 11 --
+only the internal loop moved, not the external contract.
 
-Human-in-the-loop guardrail for this feature specifically: the assistant
+Human-in-the-loop guardrail for this feature specifically: every specialist
 can retrieve/compute freely (all read-only), but the one tool that could
 change the report (propose_text_update) never writes anything itself -- it
 returns a proposal that the UI renders as a card with an explicit "Apply"
@@ -16,17 +21,15 @@ uses. See tools.propose_text_update's own docstring.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Callable
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sqlalchemy.orm import Session
 
 from app.db.models import AgentConversation, AgentLlmCall, AgentMessage, AppraisalReport, ReportDocument
-from app.services.llm.providers import build_sampling_kwargs, estimate_cost_usd, get_chat_model, resolve_chat_model
-from app.services.llm.tools import build_assistant_tools
-from app.services.llm.valuation_chain import _extract_text
+from app.services.llm.orchestrator_graph import build_orchestrator_graph
+from app.services.llm.providers import build_sampling_kwargs, estimate_cost_usd, resolve_chat_model
 
 MAX_OUTPUT_TOKENS = 2000
 MAX_TOOL_ITERATIONS = 6
@@ -38,37 +41,6 @@ MAX_TOOL_ITERATIONS = 6
 MIN_OUTPUT_TOKENS = 200
 MAX_OUTPUT_TOKENS_HARD_CAP = 8000
 MAX_TOOL_ITERATIONS_HARD_CAP = 12
-
-_SYSTEM_PROMPT = """Ти си асистент на лицензиран оценител на недвижими имоти в България,
-работещ в контекста на КОНКРЕТЕН оценителски доклад. Помагаш чрез разговор -- отговаряш
-на въпроси, търсиш сравними обяви, смяташ стойности с инструментите, и по желание
-предлагаш текст за полетата на доклада.
-
-СТРОГИ ПРАВИЛА:
-- Никога не смятай пазарни агрегати, доходни стойности или претеглени заключения наум --
-  винаги викай съответния инструмент (get_pool_stats, get_market_trend_stats,
-  compute_income_valuation, compute_weighted_value).
-- Когато оценителят поиска да напишеш/обновиш описание на имота, обосновка на
-  съпоставимата зона, или обосновка на доходния подход -- ВИНАГИ извиквай
-  propose_text_update, никога не пиши текста директно в отговора си вместо това.
-  Инструментът не записва нищо -- само предлага текст, който оценителят вижда като
-  карта с бутон "Приложи" и решава сам дали да приложи.
-- Ползвай retrieve_sale_comparables/retrieve_rent_comparables за конкретни сравними
-  обяви, вместо да измисляш адреси или цени.
-- Ако за доклада има качени документи (виж списъка по-долу, ако е непразен) -- ПРОВЕРЯВАЙ
-  и ПОЛЗВАЙ ги ПРОАКТИВНО, особено преди да пишеш описание на имота или друг текст за
-  доклада, дори ако оценителят не ги е споменал изрично в текущото съобщение. Не карай
-  оценителя да ти напомня за вече качени документи -- той очаква да ги знаеш. Викай
-  list_documents за да видиш какво е налично, после read_document за конкретния файл,
-  преди да отговориш. За скица: прочетеното е широк критичен прочит на чертежа
-  (разпределение, пропорции, съответствие с декларираните данни), не само площи -- ако
-  има area_summary с тераси, коефициентът за коригирана площ вече е приложен
-  детерминирано (не преизчислявай сам с друг коефициент).
-- Ако оценителят поиска критичен преглед/сверка/втори поглед върху доклада -- викай
-  request_critical_review вместо да разсъждаваш сам. Това е отделен, по-задълбочен анализ
-  (собствен LLM разговор върху цялото състояние на доклада), не просто твоето мнение в
-  този отговор.
-- Пиши кратко и конкретно, като разговор с колега, не като генериран доклад."""
 
 
 @dataclass
@@ -228,78 +200,35 @@ def run_assistant_turn(
     _persist_message(db, conversation.id, "user", content=user_text)
 
     provider, model_id = resolve_chat_model(provider, model)
-    # conversation_id/provider/model_id let request_critical_review (Tier 4)
-    # log its own separate LLM call to agent_llm_calls under this
-    # conversation -- resolved before building tools so the critic reuses
-    # the SAME model the appraiser already picked, not a second choice.
-    tools = build_assistant_tools(db, report, conversation_id=conversation.id, provider=provider, model=model_id)
     effective_max_tokens = MAX_OUTPUT_TOKENS if max_output_tokens is None else max(MIN_OUTPUT_TOKENS, min(MAX_OUTPUT_TOKENS_HARD_CAP, max_output_tokens))
     effective_max_iterations = MAX_TOOL_ITERATIONS if max_tool_iterations is None else max(1, min(MAX_TOOL_ITERATIONS_HARD_CAP, max_tool_iterations))
     sampling_kwargs = build_sampling_kwargs(
         provider, temperature=temperature, top_p=top_p, top_k=top_k,
         frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, seed=seed,
     )
-    chat_model = get_chat_model(provider, model_id, max_tokens=effective_max_tokens, **sampling_kwargs)
-    model_with_tools = chat_model.bind_tools(tools)
-    tools_by_name = {t.name: t for t in tools}
 
-    system_content = _SYSTEM_PROMPT + _documents_note(db, report.id)
-    messages: list = [SystemMessage(content=system_content)] + _load_langchain_messages(db, conversation.id)
-
-    total_input_tokens = 0
-    total_output_tokens = 0
     call_log: list[dict] = []
-    final_text = ""
+
+    def on_progress_cb(step: str) -> None:
+        progress.step = step
+        emit()
+
+    def on_message_cb(role: str, content: str | None, tool_calls: list | None, tool_call_id: str | None) -> None:
+        _persist_message(db, conversation.id, role, content=content, tool_calls=tool_calls, tool_call_id=tool_call_id)
+
+    graph = build_orchestrator_graph(
+        db=db, report=report, documents_note=_documents_note(db, report.id),
+        provider=provider, model_id=model_id, sampling_kwargs=sampling_kwargs,
+        max_tokens=effective_max_tokens, max_tool_iterations=effective_max_iterations,
+        call_log=call_log, msg_seq=msg_seq, on_progress=on_progress_cb, on_message=on_message_cb,
+    )
+    initial_state = {
+        "messages": _load_langchain_messages(db, conversation.id),
+        "next_specialist": None, "direct_answer": None, "findings": {},
+    }
 
     try:
-        for iteration_idx in range(effective_max_iterations):
-            progress.step = "Мисля…"
-            chunk_accum = None
-            last_chunk_usage = {}
-            for chunk in model_with_tools.stream(messages):
-                chunk_accum = chunk if chunk_accum is None else chunk_accum + chunk
-                if chunk.usage_metadata:
-                    last_chunk_usage = chunk.usage_metadata
-                live_text = _extract_text(chunk_accum.content)
-                progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(live_text) // 4, 0)
-                emit()
-            response: AIMessage = chunk_accum
-            call_in = last_chunk_usage.get("input_tokens", 0)
-            call_out = last_chunk_usage.get("output_tokens", 0)
-            total_input_tokens += call_in
-            total_output_tokens += call_out
-            call_log.append({"call_label": f"msg{msg_seq}_step{iteration_idx + 1}", "input_tokens": call_in, "output_tokens": call_out})
-            progress.tokens_so_far = total_input_tokens + total_output_tokens
-            emit()
-
-            messages.append(response)
-
-            if not response.tool_calls:
-                final_text = _extract_text(response.content)
-                _persist_message(db, conversation.id, "assistant", content=final_text)
-                break
-
-            _persist_message(
-                db, conversation.id, "assistant",
-                content=_extract_text(response.content) or None,
-                tool_calls=response.tool_calls,
-            )
-
-            for call in response.tool_calls:
-                progress.step = f"Изпълнявам: {call['name']}…"
-                emit()
-                tool = tools_by_name.get(call["name"])
-                result = tool.invoke(call["args"]) if tool else {"error": f"unknown tool {call['name']}"}
-                result_json = json.dumps(result, default=str, ensure_ascii=False)
-                messages.append(ToolMessage(content=result_json, tool_call_id=call["id"]))
-                _persist_message(db, conversation.id, "tool", content=result_json, tool_call_id=call["id"])
-        else:
-            # Loop exhausted without a final answer -- still a completed
-            # turn (all messages up to here are persisted), just without a
-            # closing assistant reply. Rare at the default MAX_TOOL_ITERATIONS=6
-            # (or whatever max_tool_iterations the appraiser dialed in).
-            final_text = ""
-            progress.step = "Достигнат лимит на стъпките за този отговор."
+        graph.invoke(initial_state)
     except Exception as exc:
         _persist_call_log(db, conversation.id, provider, model_id, call_log)
         progress.status = "error"
@@ -312,6 +241,6 @@ def run_assistant_turn(
 
     progress.status = "done"
     progress.step = "Готово"
-    progress.tokens_so_far = total_input_tokens + total_output_tokens
+    progress.tokens_so_far = sum(e["input_tokens"] + e["output_tokens"] for e in call_log)
     emit()
     return progress
