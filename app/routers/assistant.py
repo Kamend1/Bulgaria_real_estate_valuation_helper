@@ -24,7 +24,7 @@ from app.services.comparable_service import get_draft_reports_for_user, update_i
 from app.services.llm import chat_store
 from app.services.llm.assistant_chain import (
     ChatProgress, get_conversation_for_user, get_or_create_conversation,
-    list_conversations, new_conversation, run_assistant_turn,
+    list_conversations, new_conversation, rename_conversation, run_assistant_turn,
 )
 from app.services.llm.providers import get_default_model, get_sampling_capabilities, list_available_models, list_configured_providers
 from app.templating import templates
@@ -184,6 +184,20 @@ async def open_conversation_route(
     # switches the active report, so /comparables/ and this page agree.
     if conv.report_id:
         request.session["active_report_id"] = str(conv.report_id)
+    return RedirectResponse(url="/assistant/", status_code=303)
+
+
+@router.post("/conversations/{conversation_id}/rename")
+async def rename_conversation_route(
+    conversation_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    title: str = Form(...),
+):
+    conv = rename_conversation(db, conversation_id, user.id, title)
+    if not conv:
+        raise HTTPException(status_code=404)
     return RedirectResponse(url="/assistant/", status_code=303)
 
 

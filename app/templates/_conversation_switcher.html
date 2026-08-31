@@ -26,7 +26,14 @@
   {% else %}
   <span>{{ conversation.title or ('Чат от ' ~ conversation.created_at.strftime('%d.%m.%Y %H:%M')) }}</span>
   {% endif %}
+  <form action="{{ conversation_open_url_prefix }}/{{ conversation.id }}/rename" method="post"
+        style="display:inline-flex;align-items:center;gap:0.25rem">
+    <input type="text" name="title" value="{{ conversation.title or '' }}"
+           placeholder="Заглавие на чата" title="Преименувай текущия чат"
+           style="padding:0.2rem 0.4rem;width:150px">
+    <button type="submit" class="btn-outline btn-sm" title="Запази заглавието">✓</button>
+  </form>
   <form action="{{ conversation_new_url }}" method="post" style="display:inline">
-    <button type="submit" class="btn-secondary btn-sm" title="Започни нов, отделен чат">+ Нов чат</button>
+    <button type="submit" class="btn-outline btn-sm" title="Започни нов, отделен чат">+ Нов чат</button>
   </form>
 </span>

@@ -126,6 +126,25 @@ def get_conversation_for_user(db: Session, conversation_id, user_id: int) -> Age
     )
 
 
+def rename_conversation(db: Session, conversation_id, user_id: int, title: str) -> AgentConversation | None:
+    """Explicit rename (Phase 12 follow-up, 2026-08-31) -- until now a
+    conversation's title was set exactly once, automatically, from the
+    first user message's opening 80 characters, and never touched again
+    (see run_assistant_turn/run_analyst_turn's `if not conversation.title`
+    line) -- with multiple conversations now possible, an appraiser needs
+    to be able to correct a generic/truncated auto-title, not just live
+    with whatever the first message happened to say. Returns None (no-op)
+    if the conversation doesn't exist or isn't owned by this user."""
+    conv = get_conversation_for_user(db, conversation_id, user_id)
+    if conv is None:
+        return None
+    title = title.strip()[:80]
+    conv.title = title or None
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
 def _trim_history(messages: list, max_messages: int = MAX_HISTORY_MESSAGES) -> list:
     """Keeps only the most recent `max_messages` -- see MAX_HISTORY_MESSAGES's
     own docstring for why. A no-op for any conversation shorter than the cap,

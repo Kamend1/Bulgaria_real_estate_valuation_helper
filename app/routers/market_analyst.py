@@ -26,7 +26,7 @@ from app.services.llm.analyst_chain import (
     ChatProgress, get_or_create_analyst_conversation, list_analyst_conversations,
     new_analyst_conversation, run_analyst_turn,
 )
-from app.services.llm.assistant_chain import get_conversation_for_user
+from app.services.llm.assistant_chain import get_conversation_for_user, rename_conversation
 from app.services.llm.providers import get_default_model, get_sampling_capabilities, list_available_models, list_configured_providers
 from app.templating import templates
 
@@ -141,6 +141,20 @@ async def open_conversation_route(
     if not conv or conv.agent_type != "market_analyst":
         raise HTTPException(status_code=404)
     request.session["active_analyst_conversation_id"] = str(conv.id)
+    return RedirectResponse(url="/analyst/", status_code=303)
+
+
+@router.post("/conversations/{conversation_id}/rename")
+async def rename_conversation_route(
+    conversation_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    title: str = Form(...),
+):
+    conv = rename_conversation(db, conversation_id, user.id, title)
+    if not conv:
+        raise HTTPException(status_code=404)
     return RedirectResponse(url="/analyst/", status_code=303)
 
 
