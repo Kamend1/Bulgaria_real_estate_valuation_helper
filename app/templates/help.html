@@ -171,7 +171,8 @@
     <li><a href="#db-schema">12. Схема на базата данни</a></li>
     <li><a href="#ai-assistant">13. AI Асистент — екип от специализирани агенти по доклада</a></li>
     <li><a href="#market-analyst">14. Пазарен анализ — свободно изследване на корпуса</a></li>
-    <li><a href="#faq">15. Типични въпроси</a></li>
+    <li><a href="#langgraph-architecture">15. Техническа архитектура на LangGraph графа</a></li>
+    <li><a href="#faq">16. Типични въпроси</a></li>
   </ol>
 </div>
 
@@ -1317,6 +1318,18 @@
   </div>
 
   <div class="help-subsection">
+    <h3>Съставни въпроси и памет между разговорите</h3>
+    <p>Диспечерът не спира задължително след първия специалист — ако репликата изисква повече от
+    един домейн ("изчисли доходната стойност и провери правните ограничения"), контролът се връща
+    към диспечера, докато не бъде достигнат таван от <strong>3 специалиста на реплика</strong>. Ако
+    повече от един специалист отговори, отговорите им се обединяват в едно свързано съобщение —
+    вместо да ви се налага да задавате два отделни въпроса.</p>
+    <p>Освен това всеки специалист "запомня" крайния си отговор в паметта на доклада — видима
+    <strong>от всеки следващ разговор на същия доклад</strong>, не само в рамките на текущия чат.
+    Диспечерът я проверява, преди да насочи специалист, за да не преоткрива вече установеното.</p>
+  </div>
+
+  <div class="help-subsection">
     <h3>Отделни чатове и заглавия</h3>
     <p>Бутонът <strong>„+ Нов чат"</strong> до заглавието на страницата стартира изцяло нов, отделен
     разговор — предишният остава недокоснат и достъпен през dropdown-а „Чат:", ако имате повече от
@@ -1346,6 +1359,20 @@
       браузър споделят тази сесия, така че превключване в единия таб ще смени какво вижда другия
       при следващото му действие. За работа по два доклада едновременно, наистина независимо,
       ползвайте отделни браузъри или инкогнито прозорец.
+    </div>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Компилатор на доклада (🧭 на страница Сравними)</h3>
+    <p>Отделно от чата — панелът <strong>„🧭 Компилирай доклада"</strong> на <code>/comparables/</code>
+    пуска избраните от вас специалисти (доходен/пазарен/по-широк пазарен анализ/правен) един по
+    един за <strong>целия</strong> доклад, с фиксирана инструкция "направи пълен преглед", вместо
+    да задавате въпрос за всеки поотделно. Резултатният екран показва находката на всеки специалист
+    и — ако някой предложи текст за доклада — карта с бутон „Приложи", както в чата.</p>
+    <div class="help-callout help-callout--info">
+      Специалистите се пускат <strong>последователно</strong>, не едновременно — компилиране на
+      няколко специалиста отнема повече време (десетки секунди), но е по-безопасно от паралелно
+      изпълнение при сегашния дизайн.
     </div>
   </div>
 </section>
@@ -1415,9 +1442,113 @@
   </div>
 </section>
 
-<!-- ═══ 15. FAQ ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══ 15. LangGraph архитектура ═════════════════════════════════════════════ -->
+<section class="help-section" id="langgraph-architecture">
+  <h2>15. Техническа архитектура на LangGraph графа</h2>
+
+  <p class="hint">Технически раздел за читатели, любопитни как точно работи "екипът от агенти"
+  под капака — не е нужен, за да ползвате AI Асистента или Пазарния анализ пълноценно
+  (виж Секции 13–14 за практическото ръководство).</p>
+
+  <p>В приложението има <strong>два отделни, компилирани LangGraph графа</strong> — не един.</p>
+
+  <div class="help-subsection">
+    <h3>Граф 1 — Диспечерският граф (обслужва AI Асистент, <code>/assistant/</code>)</h3>
+
+    <p><code>app/services/llm/orchestrator_graph.py::build_orchestrator_graph()</code> строи
+    изцяло <strong>нов</strong> граф при <em>всеки</em> отделен ход в чата — няма кеширан граф между
+    ходовете, няма LangGraph checkpointer/memory saver. Единственото трайно състояние е
+    PostgreSQL (<code>agent_messages</code>) — при всеки ход историята се зарежда наново от базата
+    (последните 40 съобщения, виж Секция 13) и се подава на графа като начално състояние.</p>
+
+    <div class="formula-box">
+      <span class="formula-label">OrchestratorState (TypedDict)</span>
+      messages: list              # заредени от БД, вече отрязани до последните 40
+      next_specialist: str | None # решението на диспечера
+      direct_answer: str | None   # попълва се само ако next_specialist == "answer"
+      findings: dict              # натрупан текст по специалист ТОЗИ ход -- четено от диспечера
+      hops: int                   # брой специалисти, отговорили тази реплика (таван: 3)
+    </div>
+
+    <table class="help-table">
+      <thead><tr><th>Node (възел)</th><th>Тип</th><th>Какво прави реално</th></tr></thead>
+      <tbody>
+        <tr><td><code>supervisor</code></td><td>Structured output, НЕ tool loop</td><td>Входна точка (и повторно достижима). Един <code>with_structured_output(RouteDecision)</code> извикване — избира следващия node; вижда и постоянната памет на доклада, и <code>findings</code> от текущия ход</td></tr>
+        <tr><td><code>income</code></td><td>Tool loop (5 инструмента)</td><td><code>compute_income_valuation</code>, <code>get_pool_stats</code>, <code>retrieve_rent_comparables</code>, <code>compute_weighted_value</code>, <code>propose_text_update</code></td></tr>
+        <tr><td><code>market</code></td><td>Tool loop (6 инструмента)</td><td><code>get_pool_stats</code>, <code>get_market_trend_stats</code>, <code>retrieve_sale_comparables</code>, <code>list_documents</code>, <code>read_document</code>, <code>propose_text_update</code></td></tr>
+        <tr><td><code>market_analysis</code></td><td>Tool loop, споделени инструменти</td><td>Ползва <code>build_analyst_tools(db)</code> — буквално същия инструментариум на самостоятелната страница Пазарен анализ, плюс <code>propose_text_update</code></td></tr>
+        <tr><td><code>legal</code></td><td>Tool loop (3 инструмента)</td><td><code>list_legal_documents</code>, <code>read_legal_document</code>, <code>propose_text_update</code></td></tr>
+        <tr><td><code>synthesize</code></td><td>Едно LLM извикване, условно</td><td>Само ако &gt;1 специалист е отговорил тази реплика — обединява находките им в едно съобщение; ако е отговорил само 1, връща се празно (без допълнителен разход)</td></tr>
+        <tr><td><code>auditor</code></td><td>Влага втори граф</td><td>Не е tool loop — обикновено извикване на функция към <strong>Граф 2</strong> по-долу (не LangGraph subgraph композиция, а директен Python извик)</td></tr>
+        <tr><td><code>direct_answer</code></td><td>Без LLM извикване</td><td>Само записва <code>state["direct_answer"]</code> като финалния отговор</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Ребра (edges)</h3>
+    <div class="formula-box">
+      <span class="formula-label">Wiring (буквално от кода)</span>
+      set_entry_point("supervisor")
+      add_conditional_edges("supervisor", route_fn, {
+          "income": "income", "market": "market",
+          "market_analysis": "market_analysis", "legal": "legal",
+          "auditor": "auditor", "answer": "direct_answer",
+          "done": "synthesize",
+      })
+      # income/market/market_analysis/legal -> условно ребро:
+      #   hops < 3  ->  обратно към "supervisor"
+      #   hops >= 3 ->  "synthesize"  (твърд таван, не UI-регулируем)
+      # auditor / direct_answer / synthesize -> безусловно към END
+    </div>
+
+    <div class="help-callout help-callout--info">
+      <strong>Ограничен цикъл, не нула.</strong> Диспечерът може да бъде достигнат повторно в
+      рамките на един ход — до 3 специалиста, преди твърд таван да форсира край. Съставен въпрос
+      ("изчисли доходната стойност И кажи правните ограничения") може да получи и двата специалиста
+      в един отговор, синтезирани в едно съобщение от <code>synthesize</code>.
+    </div>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Граф 2 — Критичният граф (влаган от <code>auditor</code> node-а)</h3>
+
+    <div class="formula-box">
+      <span class="formula-label">CriticState (TypedDict)</span>
+      report_id: str
+      context: dict     # чисти DB четения, нула LLM извиквания
+      critique: dict     # структуриран резултат от единствения LLM call
+    </div>
+
+    <p>Два node-а, линейно: <code>gather_context</code> (само DB четения — pool статистика, AVM
+    прогноза, вече написани текстове, закачени стойности) → <code>critique</code> (едно
+    <code>with_structured_output(CritiqueResult)</code> извикване). Нито условни ребра, нито
+    цикли — най-простият възможен граф в кодовата база, и всъщност първият изобщо построен тук
+    (предшества диспечерския граф с две фази разработка).</p>
+  </div>
+
+  <div class="help-subsection">
+    <h3>Постоянна памет и Компилаторът на доклада</h3>
+    <p><code>report_agent_findings</code> е append-only таблица (огледало на снимките на цени на
+    обявите) — всеки специалист/одитор пише финалния си отговор там веднага след завършване, през
+    <code>report_memory.persist_finding()</code>. Диспечерът чете последния ред на домейн чрез
+    <code>get_report_memory()</code> и го инжектира в собствения си системен промпт — така знае
+    какво вече е установено за доклада, дори от съвсем друг разговор.</p>
+    <p>Компилаторът на доклада (<code>app/services/llm/report_compiler.py</code>) не минава през
+    диспечера изобщо — оценителят вече е избрал кои специалисти да се пуснат (чекбоксове), затова
+    графът не е нужен; вика директно същата функция, която строи инструментите/промпта на всеки
+    специалист (<code>build_specialist_tools_and_prompt</code>) и същия tool loop
+    (<code>_build_tool_loop</code>), само с фиксирана "направи пълен преглед" инструкция вместо
+    диспечерско решение. Специалистите се пускат последователно — споделят една SQLAlchemy сесия,
+    която не е безопасна за конкурентна употреба от няколко нишки едновременно.</p>
+    <p class="hint">За разлика от диспечерския граф, market analyst-ският собствен loop
+    (<code>analyst_chain.py</code>) вече също вика <code>_build_tool_loop</code> директно (с
+    <code>report_id=None</code>, тъй като не е обвързан с доклад) — не поддържа собствено копие на
+    цикъла.</p>
+  </div>
+</section>
+
+<!-- ═══ 16. FAQ ═══════════════════════════════════════════════════════════════ -->
 <section class="help-section" id="faq">
-  <h2>15. Типични въпроси</h2>
+  <h2>16. Типични въпроси</h2>
 
   <div class="faq-list">
 

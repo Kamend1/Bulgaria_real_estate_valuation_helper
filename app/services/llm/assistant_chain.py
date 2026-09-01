@@ -240,6 +240,7 @@ def _persist_call_log(db: Session, conversation_id, provider: str, model_id: str
                 input_tokens=entry["input_tokens"],
                 output_tokens=entry["output_tokens"],
                 estimated_cost_usd=cost,
+                notes=entry.get("notes"),
             ))
         db.commit()
     except Exception:
@@ -313,10 +314,11 @@ def run_assistant_turn(
         provider=provider, model_id=model_id, sampling_kwargs=sampling_kwargs,
         max_tokens=effective_max_tokens, max_tool_iterations=effective_max_iterations,
         call_log=call_log, msg_seq=msg_seq, on_progress=on_progress_cb, on_message=on_message_cb,
+        memory_source="chat", memory_source_id=conversation.id,
     )
     initial_state = {
         "messages": _load_langchain_messages(db, conversation.id),
-        "next_specialist": None, "direct_answer": None, "findings": {},
+        "next_specialist": None, "direct_answer": None, "findings": {}, "hops": 0,
     }
 
     try:

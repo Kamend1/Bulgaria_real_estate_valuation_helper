@@ -1,0 +1,37 @@
+{# Consolidated review screen for a finished Report Compiler run (Phase 13,
+   2026-09-01) -- one card per specialist domain that actually ran, each
+   with its own findings text and (if the specialist called
+   propose_text_update) a proposal box with its own "Приложи" button.
+   Posts to the SAME /assistant/apply-proposal route the chat's proposal
+   cards use (assistant/_messages.html) -- propose_text_update returns the
+   identical {field, field_label, text} shape regardless of which
+   specialist or entry point produced it, so applying it is identical too. #}
+<div class="badge badge-warn" style="display:inline-block;margin:0.5rem 0">
+  Чернова — изисква преглед
+</div>
+
+{% for domain, data in results.items() %}
+<div class="card" style="margin-bottom:0.75rem">
+  <h4 style="margin-bottom:0.4rem">{{ domain_labels.get(domain, domain) }}</h4>
+  <div style="white-space:pre-line">{{ data.text }}</div>
+
+  {% for p in data.proposals %}
+  <div class="card" style="margin-top:0.6rem;background:#fffbeb;border-color:#fde68a">
+    <div class="hint" style="margin-bottom:0.3rem">Предложение: {{ p.field_label }}</div>
+    <div style="white-space:pre-line">{{ p.text }}</div>
+    <form hx-post="/assistant/apply-proposal" hx-target="closest .card" hx-swap="beforeend"
+          style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem">
+      <input type="hidden" name="field" value="{{ p.field }}">
+      <input type="hidden" name="text" value="{{ p.text }}">
+      <button type="submit" class="btn-primary btn-sm">Приложи в доклада</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="hint">Няма резултати.</p>
+{% endfor %}
+
+<p class="hint">
+  Компилиране от {{ run.created_at.strftime('%d.%m.%Y %H:%M') }} &nbsp;·&nbsp; {{ run.provider }}/{{ run.model }}
+</p>

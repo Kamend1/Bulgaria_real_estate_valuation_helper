@@ -400,6 +400,12 @@ def _write_income_valuation_table(doc: Document, report: AppraisalReport) -> Non
         r_src.font.size = Pt(9)
         r_src.font.color.rgb = _MUTED
 
+    discount_rate = detail.get("discount_rate_pct_used")
+    discount_note = (
+        f"  ·  Дисконтова норма (DCF) {_fmt(discount_rate, 2)}%"
+        if discount_rate is not None and round(discount_rate, 2) != round(a.get("cap_rate_pct") or 0, 2)
+        else ""
+    )
     p_assum = doc.add_paragraph(
         f"Наем {_fmt(a.get('rent_per_sqm_month'), 1)} EUR/кв.м/мес  ·  "
         f"Разходи {_fmt(a.get('expenses_pct'), 1)}%  ·  "
@@ -408,6 +414,7 @@ def _write_income_valuation_table(doc: Document, report: AppraisalReport) -> Non
         f"Ръст {_fmt(a.get('growth_pct'), 1)}%/год  ·  "
         f"Хоризонт {a.get('period_years', '—')} год.  ·  "
         f"Терм. Cap Rate {_fmt(a.get('terminal_cap_rate_pct'), 2)}%"
+        f"{discount_note}"
     )
     p_assum.runs[0].italic = True
     p_assum.runs[0].font.size = Pt(9)
@@ -1044,6 +1051,7 @@ def update_income_valuation(
     period_years: int | None = None,
     terminal_cap_rate_pct: float | None = None,
     subject_area_sqm: float | None = None,
+    discount_rate_pct: float | None = None,
 ) -> None:
     """Replaces the old update_income_approach (2026-08-25 audit): that
     version only ever persisted rent/cap_rate/the final per-sqm number,
@@ -1076,6 +1084,7 @@ def update_income_valuation(
         growth_pct=growth_pct if growth_pct is not None else d["growth_pct"],
         period_years=int(period_years) if period_years else d["period_years"],
         terminal_cap_rate_pct=terminal_cap_rate_pct if terminal_cap_rate_pct is not None else d["terminal_cap_rate_pct"],
+        discount_rate_pct=discount_rate_pct,
     )
     detail = compute_income_valuation(**kwargs)
     detail["assumptions_used"] = dict(kwargs)
@@ -1140,6 +1149,19 @@ def update_income_market_rationale(db: Session, report_id: uuid.UUID, text: str 
     db.commit()
 
 
+def update_appraiser_notes(db: Session, report_id: uuid.UUID, text: str | None) -> None:
+    """appraiser_notes was already read by the DOCX/Excel export (see
+    generate_docx/export_excel) but had no writer anywhere -- Phase 13
+    (2026-09-01) gives the legal and market_analysis specialists a
+    proposable landing field, since neither fits subject_description/
+    submarket_rationale/income_market_rationale."""
+    report = db.get(AppraisalReport, report_id)
+    if not report:
+        return
+    report.appraiser_notes = text or None
+    db.commit()
+
+
 def update_residual_approach(
     db: Session,
     report_id: uuid.UUID,
@@ -1167,6 +1189,7 @@ INCOME_ASSUMPTION_BOUNDS = {
     "growth_pct": (-2.0, 6.0),
     "period_years": (3, 10),
     "terminal_cap_rate_pct": (5.0, 12.0),
+    "discount_rate_pct": (4.0, 15.0),
 }
 INCOME_ASSUMPTION_DEFAULTS = {
     "expenses_pct": 20.0,
@@ -1187,24 +1210,31 @@ def compute_income_valuation(
     growth_pct: float,
     period_years: int,
     terminal_cap_rate_pct: float,
+    discount_rate_pct: float | None = None,
 ) -> dict:
     """Direct capitalization + multi-year DCF with terminal value.
 
     Pure Python port of _income_analysis.html's calcIncome() JS -- kept in
     exact numeric parity (same formula, same variable roles) so this
     produces the same figures the manual UI panel would show for identical
-    inputs. NOI = annual rent x (1-expenses) x (1-vacancy); the DCF
-    discounts NOI at cap_rate_pct (used as the discount rate, matching the
-    existing UI's own convention -- "use cap rate as discount rate") over
-    period_years with growth_pct annual rent growth, plus a terminal value
-    (NOI at year period+1 / terminal_cap_rate_pct, discounted back at the
-    same rate). All percentages are plain numbers (7.0 means 7%, not 0.07).
+    inputs. NOI = annual rent x (1-expenses) x (1-vacancy); direct
+    capitalization always divides by cap_rate_pct.
+
+    discount_rate_pct (Phase 14 Tier 1.3, 2026-09-02): the DCF leg discounts
+    NOI at this rate instead of cap_rate_pct -- a cap rate (direct-cap
+    perpetuity yield) and a discount rate (multi-year risk-adjusted required
+    return) are methodologically distinct, but the two were conflated here
+    since Phase 7 ("use cap rate as discount rate", the UI's own old
+    comment). Left as None, it still falls back to cap_rate_pct -- every
+    report saved before this field existed keeps its exact prior DCF value,
+    unchanged. All percentages are plain numbers (7.0 means 7%, not 0.07).
     """
     expenses = expenses_pct / 100
     vacancy = vacancy_pct / 100
     cap_rate = cap_rate_pct / 100
     growth = growth_pct / 100
     terminal_cap_rate = terminal_cap_rate_pct / 100
+    discount_rate_pct_effective = discount_rate_pct if discount_rate_pct is not None else cap_rate_pct
 
     annual_rent = rent_per_sqm_month * 12
     effective_pct = (1 - expenses) * (1 - vacancy)
@@ -1217,7 +1247,7 @@ def compute_income_valuation(
     rows = []
     pv = 0.0
     current_noi = noi
-    r = cap_rate
+    r = discount_rate_pct_effective / 100
     for t in range(1, int(period_years) + 1):
         pv_factor = 1 / ((1 + r) ** t)
         pv_noi = current_noi * pv_factor
@@ -1257,6 +1287,7 @@ def compute_income_valuation(
         "noi_per_sqm_year": round(noi, 2),
         "direct_value_per_sqm": round(direct_value, 2) if direct_value is not None else None,
         "dcf_value_per_sqm": round(dcf_value, 2),
+        "discount_rate_pct_used": round(discount_rate_pct_effective, 2),
         "dcf_rows": rows,
         "terminal_value_pv_per_sqm": round(pv_tv, 2),
         "terminal_value_undiscounted_per_sqm": round(tv_undiscounted, 2),
@@ -1623,6 +1654,9 @@ def _write_summary_sheet(wb, db: Session, report: AppraisalReport) -> None:
             _label_row(ws, "Ръст наем %/год", a.get("growth_pct"))
             _label_row(ws, "Хоризонт (год.)", a.get("period_years"))
             _label_row(ws, "Терминален Cap Rate %", a.get("terminal_cap_rate_pct"))
+            discount_rate = detail.get("discount_rate_pct_used")
+            if discount_rate is not None and round(discount_rate, 2) != round(a.get("cap_rate_pct") or 0, 2):
+                _label_row(ws, "Дисконтова норма (DCF) %", discount_rate)
             _label_row(ws, "NOI/кв.м/год (EUR)", detail.get("noi_per_sqm_year"))
             _label_row(ws, "Стойност — директна капитализация (EUR/кв.м)", detail.get("direct_value_per_sqm"))
             _label_row(ws, "Стойност — DCF (EUR/кв.м)", detail.get("dcf_value_per_sqm"))

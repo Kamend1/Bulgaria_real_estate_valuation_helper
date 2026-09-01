@@ -107,9 +107,12 @@ def _income_valuation_description() -> str:
         f"  cap_rate_pct: {b['cap_rate_pct'][0]}-{b['cap_rate_pct'][1]} (default {d['cap_rate_pct']})\n"
         f"  growth_pct: {b['growth_pct'][0]}-{b['growth_pct'][1]} (default {d['growth_pct']})\n"
         f"  period_years: {b['period_years'][0]}-{b['period_years'][1]} (default {d['period_years']})\n"
-        f"  terminal_cap_rate_pct: {b['terminal_cap_rate_pct'][0]}-{b['terminal_cap_rate_pct'][1]} (default {d['terminal_cap_rate_pct']})\n\n"
+        f"  terminal_cap_rate_pct: {b['terminal_cap_rate_pct'][0]}-{b['terminal_cap_rate_pct'][1]} (default {d['terminal_cap_rate_pct']})\n"
+        f"  discount_rate_pct: {b['discount_rate_pct'][0]}-{b['discount_rate_pct'][1]} (optional -- leave unset "
+        "to discount the DCF at cap_rate_pct, same as direct capitalization; set explicitly only if you have "
+        "a reasoned, risk-adjusted required return that differs from the cap rate, and explain why)\n\n"
         "Returns gross_yield_pct, net_yield_pct, noi_per_sqm_year, "
-        "direct_value_per_sqm, dcf_value_per_sqm, dcf_rows (year-by-year), "
+        "direct_value_per_sqm, dcf_value_per_sqm, dcf_rows (year-by-year), discount_rate_pct_used, "
         "terminal_value_pv_per_sqm, and sensitivity (a 5x5 grid of "
         "direct-capitalization value at cap_rate x rent variants, ±10%/±20% "
         "around the values you passed) -- all computed here, not by you. "
@@ -130,6 +133,7 @@ def _income_valuation_fn(report: AppraisalReport):
         growth_pct: float = d["growth_pct"],
         period_years: int = d["period_years"],
         terminal_cap_rate_pct: float = d["terminal_cap_rate_pct"],
+        discount_rate_pct: float | None = None,
     ) -> dict:
         clamped = {
             "expenses_pct": _clamp(expenses_pct, "expenses_pct"),
@@ -139,12 +143,17 @@ def _income_valuation_fn(report: AppraisalReport):
             "period_years": int(_clamp(period_years, "period_years")),
             "terminal_cap_rate_pct": _clamp(terminal_cap_rate_pct, "terminal_cap_rate_pct"),
         }
+        discount_rate_clamped = _clamp(discount_rate_pct, "discount_rate_pct") if discount_rate_pct is not None else None
         result = compute_income_valuation(
             rent_per_sqm_month=rent_per_sqm_month,
             sale_price_per_sqm=sale_price_per_sqm,
+            discount_rate_pct=discount_rate_clamped,
             **clamped,
         )
-        result["assumptions_used"] = {"rent_per_sqm_month": rent_per_sqm_month, "sale_price_per_sqm": sale_price_per_sqm, **clamped}
+        result["assumptions_used"] = {
+            "rent_per_sqm_month": rent_per_sqm_month, "sale_price_per_sqm": sale_price_per_sqm,
+            **clamped, "discount_rate_pct": discount_rate_clamped,
+        }
         return result
 
     return compute_income_valuation_tool
@@ -175,6 +184,7 @@ _PROPOSABLE_FIELDS = {
     "subject_description": "Свободното описание на оценявания имот",
     "submarket_rationale": "Обосновката на съпоставимата зона (пазарен подход)",
     "income_market_rationale": "Обосновката на доходния подход",
+    "appraiser_notes": "Бележки на оценителя (свободен текст, вкл. правни/пазарни наблюдения)",
 }
 
 
@@ -204,7 +214,9 @@ def _retrieve_comparables_fn(db: Session, report: AppraisalReport, comparable_ty
 def _propose_text_update_fn(report: AppraisalReport):
     def propose_text_update(field: str, new_text: str) -> dict:
         """Propose new text for one of the report's free-text fields:
-        subject_description, submarket_rationale, or income_market_rationale.
+        subject_description, submarket_rationale, income_market_rationale, or
+        appraiser_notes (general notes -- use this one for legal/market-analysis
+        observations that don't fit the other three).
         This does NOT save anything -- it only returns a proposal that the
         appraiser sees as a card in the chat with an explicit "Приложи"
         (Apply) button. Nothing is ever written to the report without the

@@ -12,21 +12,27 @@ agent_llm_calls tables with the report-scoped assistant
 that module's message (de)serialization and call-log persistence directly
 -- both are already report-agnostic (they only ever touched
 conversation_id), so no code with report-specific behavior is shared here.
+
+Phase 13 (2026-09-01) retired this module's own hand-rolled tool-calling
+loop -- it was a byte-for-byte copy of orchestrator_graph.py's
+_build_tool_loop (bind_tools -> stream -> accumulate -> execute -> repeat),
+the exact kind of duplication that extraction was meant to kill. Now calls
+that shared loop directly with report_id=None (report_memory.persist_finding
+treats that as a legitimate no-op -- this agent has no report to attach
+memory to) instead of maintaining a third copy.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Callable
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import Session
 
 from app.db.models import AgentConversation, AgentMessage
 from app.services.llm.analyst_tools import build_analyst_tools
 from app.services.llm.assistant_chain import ChatProgress, _load_langchain_messages, _persist_call_log, _persist_message
-from app.services.llm.providers import build_sampling_kwargs, get_chat_model, is_length_truncated, resolve_chat_model
-from app.services.llm.valuation_chain import _extract_text
+from app.services.llm.orchestrator_graph import _build_tool_loop
+from app.services.llm.providers import build_sampling_kwargs, resolve_chat_model
 
 MAX_OUTPUT_TOKENS = 3000
 MAX_TOOL_ITERATIONS = 6
@@ -105,10 +111,10 @@ def run_analyst_turn(
     max_output_tokens: int | None = None,
     max_tool_iterations: int | None = None,
 ) -> ChatProgress:
-    """Mirrors assistant_chain.run_assistant_turn's tool-calling loop
-    exactly (streaming, per-call token ledger, persisted history) but
-    against build_analyst_tools(db) and no report/document-note/critic
-    wiring -- this agent has no report to write to or critique."""
+    """Builds and runs the shared specialist tool loop (orchestrator_graph.
+    _build_tool_loop) with report_id=None -- same streaming/per-call token
+    ledger/persisted-history behavior as before Phase 13, just no longer a
+    separate hand-written copy of that loop."""
     progress = ChatProgress()
 
     def emit():
@@ -135,62 +141,25 @@ def run_analyst_turn(
         provider, temperature=temperature, top_p=top_p, top_k=top_k,
         frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, seed=seed,
     )
-    chat_model = get_chat_model(provider, model_id, max_tokens=effective_max_tokens, **sampling_kwargs)
-    model_with_tools = chat_model.bind_tools(tools)
-    tools_by_name = {t.name: t for t in tools}
 
-    messages: list = [SystemMessage(content=_SYSTEM_PROMPT)] + _load_langchain_messages(db, conversation.id)
-
-    total_input_tokens = 0
-    total_output_tokens = 0
     call_log: list[dict] = []
-    final_text = ""
+
+    def on_progress_cb(step: str) -> None:
+        progress.step = step
+        emit()
+
+    def on_message_cb(role: str, content: str | None, tool_calls: list | None, tool_call_id: str | None, truncated: bool = False) -> None:
+        _persist_message(db, conversation.id, role, content=content, tool_calls=tool_calls, tool_call_id=tool_call_id, truncated=truncated)
+
+    node = _build_tool_loop(
+        provider=provider, model_id=model_id, sampling_kwargs=sampling_kwargs, max_tokens=effective_max_tokens,
+        tools=tools, system_prompt=_SYSTEM_PROMPT, max_iterations=effective_max_iterations,
+        call_log=call_log, call_label_prefix=f"msg{msg_seq}", on_progress=on_progress_cb, on_message=on_message_cb,
+        step_label="Мисля…", db=db, report_id=None, memory_source="chat", memory_source_id=conversation.id,
+    )
 
     try:
-        for iteration_idx in range(effective_max_iterations):
-            progress.step = "Мисля…"
-            chunk_accum = None
-            last_chunk_usage = {}
-            for chunk in model_with_tools.stream(messages):
-                chunk_accum = chunk if chunk_accum is None else chunk_accum + chunk
-                if chunk.usage_metadata:
-                    last_chunk_usage = chunk.usage_metadata
-                live_text = _extract_text(chunk_accum.content)
-                progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(live_text) // 4, 0)
-                emit()
-            response: AIMessage = chunk_accum
-            call_in = last_chunk_usage.get("input_tokens", 0)
-            call_out = last_chunk_usage.get("output_tokens", 0)
-            total_input_tokens += call_in
-            total_output_tokens += call_out
-            call_log.append({"call_label": f"msg{msg_seq}_step{iteration_idx + 1}", "input_tokens": call_in, "output_tokens": call_out})
-            progress.tokens_so_far = total_input_tokens + total_output_tokens
-            emit()
-
-            messages.append(response)
-
-            if not response.tool_calls:
-                final_text = _extract_text(response.content)
-                _persist_message(db, conversation.id, "assistant", content=final_text, truncated=is_length_truncated(response))
-                break
-
-            _persist_message(
-                db, conversation.id, "assistant",
-                content=_extract_text(response.content) or None,
-                tool_calls=response.tool_calls,
-            )
-
-            for call in response.tool_calls:
-                progress.step = f"Изпълнявам: {call['name']}…"
-                emit()
-                tool = tools_by_name.get(call["name"])
-                result = tool.invoke(call["args"]) if tool else {"error": f"unknown tool {call['name']}"}
-                result_json = json.dumps(result, default=str, ensure_ascii=False)
-                messages.append(ToolMessage(content=result_json, tool_call_id=call["id"]))
-                _persist_message(db, conversation.id, "tool", content=result_json, tool_call_id=call["id"])
-        else:
-            final_text = ""
-            progress.step = "Достигнат лимит на стъпките за този отговор."
+        node({"messages": _load_langchain_messages(db, conversation.id)})
     except Exception as exc:
         _persist_call_log(db, conversation.id, provider, model_id, call_log)
         progress.status = "error"
@@ -203,6 +172,6 @@ def run_analyst_turn(
 
     progress.status = "done"
     progress.step = "Готово"
-    progress.tokens_so_far = total_input_tokens + total_output_tokens
+    progress.tokens_so_far = sum(e["input_tokens"] + e["output_tokens"] for e in call_log)
     emit()
     return progress

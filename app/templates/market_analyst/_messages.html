@@ -111,7 +111,7 @@
     <tbody>
       {% for call in calls %}
       <tr>
-        <td class="sub-text">{{ call.call_label }}</td>
+        <td class="sub-text">{{ call.call_label }}{% if call.notes %}<br><span class="hint" style="font-size:0.75rem">{{ call.notes }}</span>{% endif %}</td>
         <td style="text-align:right">{{ call.input_tokens }}</td>
         <td style="text-align:right">{{ call.output_tokens }}</td>
         <td style="text-align:right">{% if call.estimated_cost_usd is not none %}${{ '%.6f' % call.estimated_cost_usd }}{% else %}—{% endif %}</td>

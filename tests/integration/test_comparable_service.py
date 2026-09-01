@@ -103,6 +103,47 @@ def test_update_income_valuation_uses_explicit_area_over_subject_area(db_session
     assert refreshed.income_valuation_detail["method"] == "dcf"
 
 
+# ── discount_rate_pct (Phase 14 Tier 1.3, 2026-09-02) ────────────────────────
+
+def test_compute_income_valuation_discount_rate_defaults_to_cap_rate():
+    # Backward compatibility: a report saved before discount_rate_pct existed
+    # (or any caller that never passes it) must get the exact same DCF value
+    # as before -- the DCF leg still discounts at cap_rate_pct.
+    with_default = comparable_service.compute_income_valuation(
+        rent_per_sqm_month=10.0, sale_price_per_sqm=None,
+        expenses_pct=20.0, vacancy_pct=8.0, cap_rate_pct=6.5,
+        growth_pct=2.0, period_years=5, terminal_cap_rate_pct=7.5,
+    )
+    explicit_same = comparable_service.compute_income_valuation(
+        rent_per_sqm_month=10.0, sale_price_per_sqm=None,
+        expenses_pct=20.0, vacancy_pct=8.0, cap_rate_pct=6.5,
+        growth_pct=2.0, period_years=5, terminal_cap_rate_pct=7.5,
+        discount_rate_pct=6.5,
+    )
+    assert with_default["dcf_value_per_sqm"] == pytest.approx(explicit_same["dcf_value_per_sqm"])
+    assert with_default["discount_rate_pct_used"] == 6.5
+
+
+def test_compute_income_valuation_discount_rate_only_affects_dcf_not_direct_cap():
+    base = comparable_service.compute_income_valuation(
+        rent_per_sqm_month=10.0, sale_price_per_sqm=None,
+        expenses_pct=20.0, vacancy_pct=8.0, cap_rate_pct=6.5,
+        growth_pct=2.0, period_years=5, terminal_cap_rate_pct=7.5,
+    )
+    higher_discount = comparable_service.compute_income_valuation(
+        rent_per_sqm_month=10.0, sale_price_per_sqm=None,
+        expenses_pct=20.0, vacancy_pct=8.0, cap_rate_pct=6.5,
+        growth_pct=2.0, period_years=5, terminal_cap_rate_pct=7.5,
+        discount_rate_pct=10.0,
+    )
+    # Direct capitalization is untouched by the discount rate -- it only ever
+    # divides NOI by cap_rate_pct.
+    assert higher_discount["direct_value_per_sqm"] == base["direct_value_per_sqm"]
+    # A higher discount rate must produce a strictly lower DCF value.
+    assert higher_discount["dcf_value_per_sqm"] < base["dcf_value_per_sqm"]
+    assert higher_discount["discount_rate_pct_used"] == 10.0
+
+
 def test_update_income_valuation_noop_when_rent_or_cap_rate_missing(db_session):
     report = _make_report(db_session, subject_area_sqm=80.0, concluded_value_income=500.0)
     comparable_service.update_income_valuation(

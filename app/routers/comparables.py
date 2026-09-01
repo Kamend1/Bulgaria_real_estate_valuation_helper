@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import AgentLlmCall, AiValuationRun, AppraisalReport, ComparablePool, User
+from app.db.models import AgentLlmCall, AiValuationRun, AppraisalReport, ComparablePool, ReportCompileRun, User
 from app.db.session import db_session, get_db
 from app.dependencies import require_auth as get_current_user
 from app.rate_limit import limiter
@@ -21,6 +21,7 @@ from app.templating import templates
 from app.services import avm_service, gis_service
 from app.services.llm import generation_store
 from app.services.llm.providers import get_default_model, list_available_models, list_configured_providers
+from app.services.llm.report_compiler import DOMAIN_LABELS, run_compile
 from app.services.llm.retriever import retrieve_comparables
 from app.services.llm.valuation_chain import GenerationProgress, generate_valuation_backbone
 
@@ -151,6 +152,11 @@ async def comparables_page(
             "adjustment_factor_labels": ADJUSTMENT_FACTOR_LABELS,
             "draft_reports": get_draft_reports_for_user(db, user.id),
             "switch_next": "/comparables/",
+            "compile_domain_labels": DOMAIN_LABELS,
+            "configured_providers": list_configured_providers(),
+            "default_provider": settings.llm_default_provider,
+            "default_model": get_default_model(settings.llm_default_provider),
+            "models_by_provider": {key: list_available_models(key) for key, _ in list_configured_providers()},
         },
     )
 
@@ -324,6 +330,121 @@ async def ai_generate_result(request: Request, run_id: str):
     return templates.TemplateResponse(
         request, "comparables/_ai_generation_result.html",
         {"result": r, "combined_text": combined_text, "combined_income_text": combined_income_text},
+    )
+
+
+# ── Report Compiler (Phase 13, 2026-09-01) ─────────────────────────────────────
+# Runs several specialists sequentially against the whole report as an
+# explicit, standalone action -- not a chat question. See
+# app/services/llm/report_compiler.py's module docstring for why this is
+# sequential, not parallel, and how it reuses the exact same specialist
+# tools/prompts as the AI Assistant chat.
+
+_COMPILE_DOMAINS = ("income", "market", "market_analysis", "legal")
+
+
+def _run_compile_thread(run_id: str, report_id: str, domains: list[str], provider: str | None, model: str | None) -> None:
+    """Background-thread target (daemon thread, NOT a FastAPI BackgroundTask
+    -- see CLAUDE.md's note on why). Own db_session(), never the request's
+    -- same reasoning as _run_generation above, doubly important here since
+    the Idea F audit found specialist tools are NOT safe to share a Session
+    across threads."""
+    def on_progress(step: str) -> None:
+        generation_store.update(run_id, GenerationProgress(status="running", step=step))
+
+    try:
+        with db_session() as db:
+            report = db.get(AppraisalReport, uuid.UUID(report_id))
+            run = db.get(ReportCompileRun, uuid.UUID(run_id))
+            if report is None or run is None:
+                generation_store.update(run_id, GenerationProgress(status="error", error="Докладът или заявката не са намерени."))
+                return
+            run_compile(db, report, run, domains, provider, model, on_progress=on_progress)
+            generation_store.update(run_id, GenerationProgress(status="done"))
+    except Exception:
+        logger.exception("Report compile failed (run_id=%s)", run_id)
+        generation_store.update(run_id, GenerationProgress(status="error", error="Неочаквана грешка при компилирането. Опитайте отново."))
+
+
+@router.post("/compile", response_class=HTMLResponse)
+@limiter.limit("10/hour")
+async def compile_report_start(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    domains: list[str] = Form([]),
+    provider_model: str = Form(""),
+):
+    report = _active_report(request, db, user)
+    selected = [d for d in domains if d in _COMPILE_DOMAINS]
+    if not selected:
+        return HTMLResponse('<p class="hint">Избери поне един специалист.</p>', status_code=400)
+
+    provider, _, model = provider_model.partition(":")
+    provider, model = (provider or None), (model or None)
+
+    run = ReportCompileRun(report_id=report.id, requested_domains=selected, status="running")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    run_id = str(run.id)
+
+    generation_store.update(run_id, GenerationProgress(status="running", step="Стартиране…"))
+    thread = threading.Thread(
+        target=_run_compile_thread, args=(run_id, str(report.id), selected, provider, model), daemon=True,
+    )
+    thread.start()
+    return templates.TemplateResponse(
+        request, "comparables/_compile_progress.html", {"run_id": run_id},
+    )
+
+
+@router.get("/compile/progress/{run_id}")
+async def compile_progress_sse(run_id: str) -> StreamingResponse:
+    async def event_stream():
+        while True:
+            progress = generation_store.get(run_id)
+            if progress is None:
+                yield _sse("done", {"status": "error", "error": "Компилирането не е намерено (може да е изтекло)."})
+                break
+
+            yield _sse("progress", {"status": progress.status, "step": progress.step})
+
+            if progress.status in ("done", "error"):
+                yield _sse("done", {"status": progress.status, "error": progress.error})
+                break
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/compile/result/{run_id}", response_class=HTMLResponse)
+async def compile_result(
+    request: Request,
+    run_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # Results are read from the DB (report_compile_runs.results), not the
+    # in-memory generation_store -- a compile run can take a while
+    # (several specialists, sequential), and the durable row is what
+    # survives generation_store's cleanup_old() eviction.
+    run = db.get(ReportCompileRun, run_id)
+    if run is None:
+        return HTMLResponse('<p class="hint">Компилирането не е намерено.</p>', status_code=404)
+    report = get_report_for_user(db, run.report_id, user.id)
+    if report is None:
+        raise HTTPException(status_code=404)
+    if run.status != "done":
+        return HTMLResponse(f'<p class="hint">Статус: {run.status}. {run.error_message or ""}</p>')
+    return templates.TemplateResponse(
+        request, "comparables/_compile_result.html",
+        {"run": run, "results": run.results or {}, "domain_labels": DOMAIN_LABELS},
     )
 
 
@@ -555,6 +676,7 @@ async def save_income_approach(
     method: str = Form("direct"),
     subject_area_sqm: str = Form(""),
     source: str = Form("manual"),
+    discount_rate_pct: str = Form(""),
 ):
     # source is accepted from the form (unlike save-sales' hardcoded
     # "manual") because it's purely a provenance label here, not a trust
@@ -583,6 +705,7 @@ async def save_income_approach(
         period_years=_i(period_years),
         terminal_cap_rate_pct=_f(terminal_cap_rate_pct),
         subject_area_sqm=_f(subject_area_sqm),
+        discount_rate_pct=_f(discount_rate_pct),
     )
     return RedirectResponse(url="/comparables/#income-panel", status_code=303)
 

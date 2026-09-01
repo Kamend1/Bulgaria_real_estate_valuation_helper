@@ -1,0 +1,39 @@
+{# Shown immediately after POST /comparables/compile while the background
+   thread runs several specialists sequentially (Phase 13, 2026-09-01) --
+   mirrors _ai_generation_progress.html's EventSource pattern exactly. #}
+<div id="compile-progress-{{ run_id }}" style="margin-top:0.75rem;padding:0.75rem;background:var(--bg-alt,#f8fafc);border-radius:6px">
+  <p class="hint">
+    <span id="compile-step-{{ run_id }}">Стартиране…</span>
+  </p>
+  <div id="compile-result-target-{{ run_id }}"></div>
+</div>
+
+<script>
+(function () {
+  var runId = {{ run_id | tojson }};
+  var es = new EventSource('/comparables/compile/progress/' + runId);
+
+  es.addEventListener('progress', function (e) {
+    var data = JSON.parse(e.data);
+    document.getElementById('compile-step-' + runId).textContent = data.step || '';
+  });
+
+  es.addEventListener('done', function (e) {
+    var data = JSON.parse(e.data);
+    es.close();
+    if (data.status === 'done') {
+      document.getElementById('compile-step-' + runId).textContent = 'Готово';
+      htmx.ajax('GET', '/comparables/compile/result/' + runId, {
+        target: '#compile-result-target-' + runId, swap: 'innerHTML',
+      });
+    } else {
+      document.getElementById('compile-step-' + runId).textContent = data.error || 'Грешка при компилирането.';
+    }
+  });
+
+  es.onerror = function () {
+    document.getElementById('compile-step-' + runId).textContent = 'Връзката е прекъсната.';
+    es.close();
+  };
+})();
+</script>

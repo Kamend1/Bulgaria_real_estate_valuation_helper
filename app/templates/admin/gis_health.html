@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}GIS състояние — Администрация{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:1.25rem">
+  <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.15rem">
+    <a href="/admin/" style="color:var(--muted);text-decoration:none">← Потребители</a>
+  </div>
+  <h1 style="margin:0">Състояние на GIS/кадастър връзките</h1>
+  <p class="hint" style="margin:0.35rem 0 0">
+    Лека проверка на достъпност (единично GET извикване, {{ "5" }} сек. таймаут) към трите
+    външни услуги, ползвани от GIS панела на /comparables/. Не проверява дали конкретна
+    заявка (напр. за конкретен имот) би успяла — само дали услугата отговаря в момента.
+  </p>
+</div>
+
+<div class="card">
+  <div style="overflow-x:auto">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Услуга</th>
+          <th>URL</th>
+          <th>Статус</th>
+          <th>Латентност</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td class="sub-text" style="word-break:break-all">{{ r.url }}</td>
+          <td>
+            {% if r.ok %}
+            <span class="badge badge-ok">достъпен{% if r.status_code %} ({{ r.status_code }}){% endif %}</span>
+            {% else %}
+            <span class="badge badge-warn">недостъпен{% if r.status_code %} ({{ r.status_code }}){% endif %}</span>
+            {% endif %}
+          </td>
+          <td>{{ r.latency_ms }} ms</td>
+        </tr>
+        {% if not r.ok and r.error %}
+        <tr>
+          <td colspan="4" class="hint" style="padding-top:0">{{ r.error }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

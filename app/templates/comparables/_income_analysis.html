@@ -84,6 +84,17 @@
                  value="7.5" oninput="calcIncome()">
         </div>
       </div>
+
+      <details style="margin-top:0.5rem">
+        <summary class="income-hint" style="cursor:pointer">Разширени настройки</summary>
+        <div class="income-group" style="margin-top:0.5rem">
+          <label class="income-label">Дисконтова норма (DCF) %
+            <span class="income-hint">по подразбиране = Cap Rate</span>
+          </label>
+          <input type="number" id="inc-discount" step="0.1" min="0.1"
+                 placeholder="= Cap Rate" oninput="calcIncome()">
+        </div>
+      </details>
     </div>
 
     <!-- RIGHT: Results -->
@@ -220,6 +231,7 @@
         <input type="hidden" name="growth_pct"            id="frm-inc-growth">
         <input type="hidden" name="period_years"          id="frm-inc-period">
         <input type="hidden" name="terminal_cap_rate_pct" id="frm-inc-terminal">
+        <input type="hidden" name="discount_rate_pct"     id="frm-inc-discount">
         <input type="hidden" name="method"                id="frm-inc-method">
         <input type="hidden" name="subject_area_sqm"      id="frm-inc-area-val">
         <input type="hidden" name="source" value="manual">
@@ -266,6 +278,8 @@ function updateIncomeSave() {
   _set('frm-inc-growth',    _v('inc-growth'));
   _set('frm-inc-period',    _v('inc-period'));
   _set('frm-inc-terminal',  _v('inc-terminal'));
+  var discountRaw = (document.getElementById('inc-discount') || {}).value || '';
+  _set('frm-inc-discount',  discountRaw);
   _set('frm-inc-method',    method);
   _set('frm-inc-area-val',  area > 0 ? area : '');
 }
@@ -307,11 +321,13 @@ function calcIncome() {
   document.getElementById('res-direct').textContent = _fmt(directVal);
   setDiff('diff-direct', directVal, salePrice);
 
-  // DCF
+  // DCF -- discounted at inc-discount if the appraiser set one, otherwise
+  // at the cap rate (backward-compatible default, Phase 14 Tier 1.3).
   let pv = 0;
   const rows = [];
   let currentNOI = noi;
-  const r = capRate;  // use cap rate as discount rate
+  const discountRaw = document.getElementById('inc-discount').value;
+  const r = discountRaw !== '' ? (parseFloat(discountRaw) / 100) : capRate;
 
   for (let t = 1; t <= period; t++) {
     const pvFactor = 1 / Math.pow(1 + r, t);

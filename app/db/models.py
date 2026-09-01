@@ -412,6 +412,7 @@ class AgentLlmCall(Base):
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
     estimated_cost_usd = Column(Numeric(10, 6))
+    notes = Column(Text)   # Phase 13, 2026-09-01: Supervisor's RouteDecision.reasoning, unused by every other call type
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -478,6 +479,55 @@ class AgentMessage(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     conversation = relationship("AgentConversation", back_populates="messages")
+
+
+class ReportCompileRun(Base):
+    """Provenance record for the "Компилирай доклада" action (Phase 13,
+    2026-09-01) -- app/routers/comparables.py's compile route runs several
+    specialists sequentially against one report (not a chat conversation)
+    and logs which ones were requested here, mirroring ScrapeRun's own
+    role as a background-action progress/provenance record."""
+    __tablename__ = "report_compile_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_domains = Column(ARRAY(Text), nullable=False)
+    provider = Column(Text)
+    model = Column(Text)
+    status = Column(Text, nullable=False, default="running", server_default="running")   # running | done | error
+    error_message = Column(Text)
+    results = Column(JSONB)   # {domain: {"text": str, "proposals": [...]}} -- filled once status='done'
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    report = relationship("AppraisalReport")
+
+
+class ReportAgentFinding(Base):
+    """Append-only log of every specialist's final answer for a report
+    (Phase 13, 2026-09-01) -- mirrors ListingSnapshot's append-only pattern
+    (history of rows, never one blob overwritten in place). Closes the gap
+    found while auditing orchestrator_graph.py: OrchestratorState.findings
+    only ever lived for one chat turn, and separate conversations on the
+    same report had zero awareness of each other. get_report_memory()
+    (app/services/llm/report_memory.py) reads the latest row per domain --
+    seen by the Supervisor's routing prompt and by the Report Compiler
+    action, regardless of which conversation (or compile run) produced it.
+
+    source_id points at agent_conversations.id (source='chat') or
+    report_compile_runs.id (source='compile') -- deliberately no hard FK,
+    same polymorphic-provenance choice already made for
+    ai_valuation_runs.output."""
+    __tablename__ = "report_agent_findings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("appraisal_reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    domain = Column(Text, nullable=False)   # income | market | market_analysis | legal | auditor
+    source = Column(Text, nullable=False)   # chat | compile
+    source_id = Column(UUID(as_uuid=True))
+    summary = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    report = relationship("AppraisalReport")
 
 
 class ReportDocument(Base):

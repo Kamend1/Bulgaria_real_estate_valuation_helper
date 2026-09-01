@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import EmailStr
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from app.db.models import AvmModel, User, UserConsent
 from app.db.session import get_db
 from app.services import auth_service
 from app.templating import templates
+from utils.gis.healthcheck import check_gis_connectors
 from utils.ml.avm_features import SEGMENT_DISPLAY_NAMES, SEGMENT_PROPERTY_TYPES
 
 logger = logging.getLogger(__name__)
@@ -291,3 +293,15 @@ async def admin_avm(request: Request, db: Session = Depends(get_db)):
             "segment_display_names": SEGMENT_DISPLAY_NAMES,
         },
     )
+
+
+# ── GIS connector health ─────────────────────────────────────────────────────
+
+@router.get("/gis-health", response_class=HTMLResponse)
+async def admin_gis_health(request: Request):
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
+
+    results = await run_in_threadpool(check_gis_connectors)
+    return templates.TemplateResponse(request, "admin/gis_health.html", {"results": results})
