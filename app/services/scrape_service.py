@@ -529,6 +529,24 @@ def run_scrape_background(
         except Exception as _ee:
             progress_run.push("log", {"message": f"Предупреждение: embeddings не се обновиха ({_ee})"})
 
+        # 10. AVM: retrain segments whose training_eligible row count grew
+        # enough since their active model was trained (Phase 14 Tier 2.1).
+        # No-op on any machine without R2_MAINTAINER_* -- see
+        # avm_retrain_service's own docstring for why that's the right gate.
+        # Non-fatal like steps 8/9: a failed retrain never fails the scrape.
+        try:
+            from app.services.avm_retrain_service import maybe_retrain_avm_models
+
+            with db_session() as session:
+                retrain_results = maybe_retrain_avm_models(
+                    session, on_progress=lambda msg: progress_run.push("log", {"message": msg})
+                )
+            retrained = [r["segment"] for r in retrain_results if r["action"] == "retrained"]
+            if retrained:
+                progress_run.push("log", {"message": f"AVM пре-трениране: {', '.join(retrained)}."})
+        except Exception as _re:
+            progress_run.push("log", {"message": f"Предупреждение: AVM пре-трениране не се изпълни ({_re})"})
+
         progress_run.status = "completed"
         progress_run.finished_at = datetime.utcnow()
         progress_run.push("done", progress_run.to_dict())

@@ -141,7 +141,7 @@
       {% endif %}
     </div>
     {% endif %}
-    <form method="post" action="/comparables/save-legal-description" id="legal-desc-form" class="approach-save-row">
+    <form method="post" action="/comparables/save-legal-description?report={{ report.id }}" id="legal-desc-form" class="approach-save-row">
       <input type="hidden" name="legal_description" id="legal-desc-hidden" value="{{ cadastre.legal.text_bg }}">
       <input type="hidden" name="source" id="legal-desc-source" value="agkk">
       <button type="submit" class="btn-primary" style="white-space:nowrap">Закачи към доклада</button>

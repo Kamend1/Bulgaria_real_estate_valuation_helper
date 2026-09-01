@@ -24,8 +24,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import MarketDocument
+from app.db.models import LegalDocumentChunk, MarketDocument
 from app.services.llm.doc_extraction import extract_native_text, ocr_via_vision
+from app.services.llm.embeddings import get_embeddings_model, resolve_embedding_model
+from app.services.llm.legal_chunking import split_legal_text
 from app.services.llm.providers import get_chat_model
 
 DOCUMENT_TYPE_LABELS = {
@@ -105,6 +107,42 @@ def _extract_legal_metadata(text: str, provider: str | None, model: str | None) 
     return result.model_dump()
 
 
+def chunk_and_embed_legal_document(db: Session, doc: MarketDocument, full_text: str) -> int:
+    """Splits a legal_standard document's verbatim text into
+    Чл./Раздел-scoped chunks and embeds each one (Phase 14 Tier 3.1) --
+    what search_legal_document (orchestrator_graph.py) actually searches
+    over, replacing "read the whole document" (the 350K-char/114,000-token
+    real-world cost problem that motivated this). Safe to call again for
+    the same document (e.g. re-extraction) -- clears any existing chunks
+    for this doc+provider+model first, matching listing_embeddings'
+    upsert-by-clearing convention rather than leaving stale duplicates.
+    Returns the number of chunks written; 0 is a valid outcome for a
+    trivially short document. Never raises past extract_document's own
+    try/except -- a failure here degrades to "no chunks yet", and
+    search_legal_document already falls back to the full text in that case.
+    """
+    pieces = split_legal_text(full_text)
+    if not pieces:
+        return 0
+
+    provider, model = resolve_embedding_model()
+    embeddings_model = get_embeddings_model(provider, model)
+    vectors = embeddings_model.embed_documents([p["text"] for p in pieces])
+
+    db.query(LegalDocumentChunk).filter(
+        LegalDocumentChunk.market_document_id == doc.id,
+        LegalDocumentChunk.provider == provider,
+        LegalDocumentChunk.model == model,
+    ).delete()
+    for i, (piece, vector) in enumerate(zip(pieces, vectors)):
+        db.add(LegalDocumentChunk(
+            market_document_id=doc.id, chunk_index=i, heading=piece["heading"],
+            text=piece["text"], embedding=vector, provider=provider, model=model,
+        ))
+    db.commit()
+    return len(pieces)
+
+
 def extract_document(db: Session, doc: MarketDocument, provider: str | None = None, model: str | None = None) -> None:
     """Runs the whole pipeline for one uploaded market document and
     persists the result. Synchronous/blocking -- call from a background
@@ -128,4 +166,16 @@ def extract_document(db: Session, doc: MarketDocument, provider: str | None = No
     except Exception as exc:
         doc.status = "failed"
         doc.error_message = str(exc)[:2000]
+        db.commit()
+        return
     db.commit()
+
+    if doc.document_type == LEGAL_DOCUMENT_TYPE:
+        try:
+            chunk_and_embed_legal_document(db, doc, raw_text)
+        except Exception:
+            # Chunking is an enhancement over the always-available full_text,
+            # not a requirement for the document to be usable -- a failure
+            # here must not flip a successfully-extracted document to
+            # "failed". search_legal_document degrades to the full text.
+            db.rollback()

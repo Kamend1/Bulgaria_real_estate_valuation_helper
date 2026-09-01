@@ -198,7 +198,7 @@
    compute_income_valuation() rather than trusting a client-submitted final
    figure (2026-08-25 audit: "one logical process" fix -- these numbers used
    to be visible only here and nowhere in the exported report). #}
-<form method="post" action="/comparables/save-income" style="display:inline">
+<form method="post" action="/comparables/save-income{{ ('?report=' ~ r.report_id) if r.report_id else '' }}" style="display:inline">
   <input type="hidden" name="rent_per_sqm_month" value="{{ v.assumptions_used.rent_per_sqm_month }}">
   <input type="hidden" name="sale_price_per_sqm" value="{{ v.assumptions_used.sale_price_per_sqm or '' }}">
   <input type="hidden" name="expenses_pct" value="{{ v.assumptions_used.expenses_pct }}">
@@ -212,7 +212,7 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
   <button type="submit" class="btn-clear btn-sm">Потвърди — директна капитализация</button>
 </form>
-<form method="post" action="/comparables/save-income" style="display:inline">
+<form method="post" action="/comparables/save-income{{ ('?report=' ~ r.report_id) if r.report_id else '' }}" style="display:inline">
   <input type="hidden" name="rent_per_sqm_month" value="{{ v.assumptions_used.rent_per_sqm_month }}">
   <input type="hidden" name="sale_price_per_sqm" value="{{ v.assumptions_used.sale_price_per_sqm or '' }}">
   <input type="hidden" name="expenses_pct" value="{{ v.assumptions_used.expenses_pct }}">

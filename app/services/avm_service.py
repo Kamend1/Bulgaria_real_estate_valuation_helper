@@ -95,6 +95,34 @@ def _predict_one(pipeline, row, use_log: bool) -> float:
     return max(pred, 1.0)
 
 
+def _shap_top_factors(pipeline, row: pd.DataFrame, top_n: int = 5) -> list[dict]:
+    """Per-prediction local explanation (Phase 14 Tier 2.3) -- top
+    contributing features for THIS ONE subject property, not the model's
+    global importance. Scoped to the LightGBM "point" leg only (same
+    reasoning as the training-time global summary in
+    scripts/train_avm_model.py -- explaining a blend meaningfully needs
+    more care than this pass calls for). If the target was log1p-
+    transformed, these SHAP values are on the log scale, not raw EUR/sqm --
+    the caller surfaces that via the top-level shap_scale field rather than
+    this function attempting a per-feature inverse transform, which isn't
+    well-defined for a nonlinear transform anyway.
+    """
+    import shap
+
+    preprocessor = pipeline.named_steps["preprocessor"]
+    model = pipeline.named_steps["model"]
+    transformed = preprocessor.transform(row)
+    if hasattr(transformed, "toarray"):
+        transformed = transformed.toarray()
+    feature_names = preprocessor.get_feature_names_out()
+    shap_values = shap.TreeExplainer(model).shap_values(transformed)[0]
+    pairs = sorted(zip(feature_names, shap_values), key=lambda p: abs(p[1]), reverse=True)[:top_n]
+    return [
+        {"feature": avm_features.clean_shap_feature_name(f), "shap_value": round(float(v), 4)}
+        for f, v in pairs
+    ]
+
+
 def _cohort_median_ppsqm(db: Session, property_type_slug: str, geo_category: str) -> float | None:
     value = db.execute(text("""
         SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY price_per_sqm_model)
@@ -108,12 +136,20 @@ def _cohort_median_ppsqm(db: Session, property_type_slug: str, geo_category: str
     return float(value) if value is not None else None
 
 
-def predict_sales_value(db: Session, report: AppraisalReport) -> dict:
+def predict_sales_value(db: Session, report: AppraisalReport, explain: bool = False) -> dict:
     """
     Returns a dict always containing "ok". On success: ppsqm_point/low/high,
     total_point/low/high, model_trained_at, metrics, clamped. On failure:
     "reason" is one of "missing_fields" | "unsupported_property_type" |
     "no_model" | "model_fetch_failed" | "prediction_error".
+
+    explain=True (Phase 14 Tier 2.3) additionally computes shap_top_factors
+    (top contributing features for this one prediction) via a TreeExplainer
+    call -- opt-in, not automatic on every call, since it's meaningfully
+    more expensive than the prediction itself for a single row. Never fails
+    the whole prediction if the explanation step itself errors -- degrades
+    to shap_top_factors=None, logged, same non-fatal spirit as the
+    model_fetch_failed/prediction_error branches above.
     """
     missing = avm_features.missing_subject_fields(report)
     if missing:
@@ -182,10 +218,21 @@ def predict_sales_value(db: Session, report: AppraisalReport) -> dict:
         ppsqm_low = min(max(ppsqm_low, lo_bound), hi_bound)
         ppsqm_high = min(max(ppsqm_high, lo_bound), hi_bound)
 
+    shap_top_factors = None
+    shap_scale = None
+    if explain:
+        try:
+            shap_top_factors = _shap_top_factors(pipelines["point"], row)
+            shap_scale = "log1p" if use_log else "raw"
+        except Exception:
+            logger.exception("AVM SHAP explanation failed for report %s, segment %s", report.id, segment)
+
     area = float(report.subject_area_sqm)
     return {
         "ok": True,
         "segment": segment,
+        "shap_top_factors": shap_top_factors,
+        "shap_scale": shap_scale,
         "ppsqm_point": round(ppsqm_point),
         "ppsqm_low": round(ppsqm_low),
         "ppsqm_high": round(ppsqm_high),

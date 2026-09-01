@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import joblib
 import numpy as np
 import pandas as pd
+import shap
 from catboost import CatBoostRegressor
 from lightgbm import LGBMRegressor
 from sklearn.compose import ColumnTransformer
@@ -51,7 +52,10 @@ from app.db.base import engine
 from app.db.models import AvmModel
 from app.db.session import db_session
 from app.services import r2_client
-from utils.ml.avm_features import CATEGORICAL_COLS, NUMERIC_COLS, SEGMENT_PROPERTY_TYPES, prep_for_catboost
+from utils.ml.avm_features import (
+    CATEGORICAL_COLS, NUMERIC_COLS, SEGMENT_PROPERTY_TYPES,
+    clean_shap_feature_name, prep_for_catboost,
+)
 from utils.ml.text_features import fit_tfidf_svd, text_feature_columns, transform_tfidf_svd
 
 # Per-segment LightGBM hyperparameters from RandomizedSearchCV tuning
@@ -268,6 +272,28 @@ def _evaluate(y_true, y_pred) -> dict:
     }
 
 
+def _compute_shap_summary(pipeline: Pipeline, X_sample: pd.DataFrame, top_n: int = 15) -> list[dict]:
+    """Global feature importance for the LightGBM "point" model (Phase 14
+    Tier 2.3) -- mean |SHAP value| over a sample of held-out rows, not the
+    whole test set (TreeExplainer is fast, but no reason to spend more than
+    a representative sample per segment's training run). Scoped to the
+    LightGBM leg only, even for blended segments -- explaining a blend of
+    two different model families' SHAP values isn't meaningful without a
+    lot more care than this pass calls for.
+    """
+    sample = X_sample.sample(n=min(300, len(X_sample)), random_state=42)
+    preprocessor = pipeline.named_steps["preprocessor"]
+    model = pipeline.named_steps["model"]
+    transformed = preprocessor.transform(sample)
+    if hasattr(transformed, "toarray"):
+        transformed = transformed.toarray()
+    feature_names = preprocessor.get_feature_names_out()
+    shap_values = shap.TreeExplainer(model).shap_values(transformed)
+    mean_abs = np.abs(shap_values).mean(axis=0)
+    pairs = sorted(zip(feature_names, mean_abs), key=lambda p: p[1], reverse=True)[:top_n]
+    return [{"feature": clean_shap_feature_name(f), "mean_abs_shap": round(float(v), 4)} for f, v in pairs]
+
+
 def _fit_pipeline(binary_cols: list[str], X_train, y_train, lgbm_params: dict, text_cols: list[str] | None = None, **lgbm_kwargs) -> Pipeline:
     pipeline = Pipeline(steps=[
         ("preprocessor", _build_preprocessor(binary_cols, text_cols)),
@@ -413,6 +439,10 @@ def train_segment(segment: str, min_rows: int, push_to_r2: bool) -> None:
     print(f"  test:       MAE={test_metrics['mae']:.1f}  R2={test_metrics['r2']:.3f}  "
           f"within10%={test_metrics['within_10_pct']:.1f}%")
 
+    print("  computing SHAP feature importance...")
+    shap_summary = _compute_shap_summary(point_pipeline, X_test)
+    print("  top features: " + ", ".join(f"{f['feature']} ({f['mean_abs_shap']:.3f})" for f in shap_summary[:5]))
+
     blend_weight = SEGMENT_BLEND_WEIGHT.get(segment)
     cb_point_model = cb_q_low_model = cb_q_high_model = None
     if blend_weight is not None:
@@ -502,6 +532,7 @@ def train_segment(segment: str, min_rows: int, push_to_r2: bool) -> None:
             companion_quantile_high_path=stored.get("companion_q_high"),
             blend_weight=blend_weight,
             text_transformer_path=stored.get("text_transformer"),
+            shap_summary=shap_summary,
         ))
 
     if push_to_r2:

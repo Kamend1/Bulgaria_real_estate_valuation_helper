@@ -19,7 +19,7 @@
   <div class="card" style="margin-top:0.6rem;background:#fffbeb;border-color:#fde68a">
     <div class="hint" style="margin-bottom:0.3rem">Предложение: {{ p.field_label }}</div>
     <div style="white-space:pre-line">{{ p.text }}</div>
-    <form hx-post="/assistant/apply-proposal" hx-target="closest .card" hx-swap="beforeend"
+    <form hx-post="/assistant/apply-proposal?report={{ run.report_id }}" hx-target="closest .card" hx-swap="beforeend"
           style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem">
       <input type="hidden" name="field" value="{{ p.field }}">
       <input type="hidden" name="text" value="{{ p.text }}">

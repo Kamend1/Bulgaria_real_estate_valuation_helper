@@ -9,7 +9,7 @@
     всичките им находки и предложения на един екран за преглед.
   </p>
 
-  <form hx-post="/comparables/compile" hx-target="#compile-slot" hx-swap="innerHTML"
+  <form hx-post="/comparables/compile?report={{ report.id }}" hx-target="#compile-slot" hx-swap="innerHTML"
         style="display:flex;flex-direction:column;gap:0.5rem">
     <div style="display:flex;gap:1rem;flex-wrap:wrap">
       {% for domain, label in compile_domain_labels.items() %}

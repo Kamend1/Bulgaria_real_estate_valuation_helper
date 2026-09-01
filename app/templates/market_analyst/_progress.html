@@ -29,7 +29,7 @@
     var data = JSON.parse(e.data);
     es.close();
     if (data.status === 'done') {
-      htmx.ajax('GET', '/analyst/messages', { target: '#chat-messages', swap: 'innerHTML' })
+      htmx.ajax('GET', '/analyst/messages?conv={{ conversation.id }}', { target: '#chat-messages', swap: 'innerHTML' })
         .then(function () {
           var box = document.getElementById('chat-messages');
           if (box) box.scrollTop = box.scrollHeight;

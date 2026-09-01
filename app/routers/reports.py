@@ -59,8 +59,11 @@ async def open_report(
     # `next` lets the quick switcher (_report_switcher.html) return you to
     # the page you switched from (e.g. /assistant/) instead of always
     # bouncing to /comparables/ -- whitelisted, never an open redirect.
+    # `?report=` carried on the redirect (Phase 14 Tier 3.2) so the tab that
+    # just switched stays pinned to this report even if another tab's
+    # session write races it afterward -- see _active_report's docstring.
     target = next if next in _OPEN_REDIRECT_TARGETS else "/comparables/"
-    return RedirectResponse(url=target, status_code=303)
+    return RedirectResponse(url=f"{target}?report={report.id}", status_code=303)
 
 
 @router.post("/{report_id}/finalize")
@@ -93,7 +96,7 @@ async def reopen_report(
     report.status = "draft"
     db.commit()
     request.session["active_report_id"] = str(report.id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return RedirectResponse(url=f"/comparables/?report={report.id}", status_code=303)
 
 
 @router.post("/{report_id}/delete")
@@ -121,7 +124,7 @@ async def new_report(
 ):
     report = new_draft(db, user.id)
     request.session["active_report_id"] = str(report.id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return RedirectResponse(url=f"/comparables/?report={report.id}", status_code=303)
 
 
 @router.post("/new-scratch")
@@ -137,7 +140,7 @@ async def new_scratch_report(
     Assistant) works on it unchanged."""
     report = new_scratch_draft(db, user.id)
     request.session["active_report_id"] = str(report.id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return RedirectResponse(url=f"/comparables/?report={report.id}", status_code=303)
 
 
 @router.post("/{report_id}/promote")
@@ -153,4 +156,4 @@ async def promote_report(
     if not report:
         raise HTTPException(status_code=404)
     promote_scratch_report(db, report_id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return RedirectResponse(url=f"/comparables/?report={report_id}", status_code=303)

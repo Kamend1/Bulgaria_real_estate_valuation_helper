@@ -8,7 +8,7 @@
   {% endfor %}
 </div>
 
-<form hx-post="/assistant/documents/upload" hx-target="#doc-list" hx-swap="afterbegin"
+<form hx-post="/assistant/documents/upload?report={{ report.id }}" hx-target="#doc-list" hx-swap="afterbegin"
       hx-encoding="multipart/form-data"
       hx-on::after-request="this.reset()"
       style="display:flex;gap:0.5rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap">

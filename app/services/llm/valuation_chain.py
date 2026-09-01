@@ -572,6 +572,7 @@ def generate_valuation_backbone(
             }
 
     result = _json_safe({
+        "report_id": str(report.id),
         "property_description": sections["property_description"],
         "comparable_selection_rationale": sections["comparable_selection_rationale"],
         "comparable_commentary": sections["comparable_commentary"],

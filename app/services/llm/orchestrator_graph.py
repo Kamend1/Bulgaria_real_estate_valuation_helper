@@ -38,11 +38,13 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
-from app.db.models import AppraisalReport, MarketDocument
+from app.db.models import AppraisalReport, LegalDocumentChunk, MarketDocument
 from app.services.llm import critic_graph
 from app.services.llm.analyst_tools import build_analyst_tools
+from app.services.llm.embeddings import get_embeddings_model, resolve_embedding_model
 from app.services.llm.providers import get_chat_model, is_length_truncated
 from app.services.llm.tools import (
     _income_valuation_description,
@@ -325,11 +327,15 @@ def _list_legal_documents_fn(db: Session):
     return list_legal_documents
 
 
-def _read_legal_document_fn(db: Session):
-    def read_legal_document(document_id: str) -> dict:
-        """Returns the FULL verbatim text of one uploaded legal/regulatory document.
-        Use this to quote an exact чл./ал./точка instead of paraphrasing from general
-        knowledge -- once a real source is available, prefer citing it explicitly."""
+def _search_legal_document_fn(db: Session):
+    def search_legal_document(document_id: str, query: str, k: int = 5) -> dict:
+        """Semantically searches WITHIN one uploaded legal/regulatory document
+        for the sections (Чл./Раздел) most relevant to `query` -- returns only
+        the top-k matching sections, not the whole document. Use this instead
+        of reading the entire text: a real uploaded document can run 350,000+
+        characters, well over 100,000 tokens for a single full read. Always
+        pass a specific, focused query (e.g. the appraiser's actual question),
+        not a generic one."""
         doc = (
             db.query(MarketDocument)
             .filter(MarketDocument.id == document_id, MarketDocument.document_type == LEGAL_DOCUMENT_TYPE)
@@ -339,12 +345,33 @@ def _read_legal_document_fn(db: Session):
             return {"error": "Документът не е намерен."}
         if doc.status != "ready":
             return {"status": doc.status, "error": doc.error_message}
-        data = doc.extracted_data or {}
+
+        provider, model = resolve_embedding_model()
+        query_vec = get_embeddings_model(provider, model).embed_query(query)
+        vec_str = "[" + ",".join(repr(float(x)) for x in query_vec) + "]"
+        rows = db.execute(sql_text("""
+            SELECT heading, text
+            FROM legal_document_chunks
+            WHERE market_document_id = :doc_id AND provider = :provider AND model = :model
+            ORDER BY embedding <=> CAST(:vec AS vector) ASC
+            LIMIT :k
+        """), {"doc_id": str(doc.id), "provider": provider, "model": model, "vec": vec_str, "k": k}).mappings().all()
+
+        if not rows:
+            # No chunks indexed yet (uploaded before chunking existed, or
+            # chunking failed at upload time) -- degrade to the full text
+            # rather than returning nothing usable.
+            data = doc.extracted_data or {}
+            return {
+                "filename": doc.filename,
+                "note": "Няма индексирани части за този документ -- пълен текст (ограничен до 20000 знака).",
+                "fallback_full_text": (data.get("full_text") or "")[:20000],
+            }
         return {
-            "filename": doc.filename, "title": data.get("title"), "issuing_body": data.get("issuing_body"),
-            "text": data.get("full_text", ""),
+            "filename": doc.filename,
+            "sections": [{"heading": r["heading"], "text": r["text"]} for r in rows],
         }
-    return read_legal_document
+    return search_legal_document
 
 
 def _route_from_supervisor(state: OrchestratorState) -> str:
@@ -492,7 +519,7 @@ def build_specialist_tools_and_prompt(
     if domain == "legal":
         tools = [
             StructuredTool.from_function(_list_legal_documents_fn(db), name="list_legal_documents"),
-            StructuredTool.from_function(_read_legal_document_fn(db), name="read_legal_document"),
+            StructuredTool.from_function(_search_legal_document_fn(db), name="search_legal_document"),
             StructuredTool.from_function(_propose_text_update_fn(report), name="propose_text_update", description="Propose new text for appraiser_notes (general free-text notes field). Never writes -- returns a proposal the appraiser must apply."),
         ]
         prompt = (
@@ -501,13 +528,16 @@ def build_specialist_tools_and_prompt(
             "(МСО/IVS) и общата рамка на професионалната етика (КНОБ).\n\n"
             "ЗАДЪЛЖИТЕЛНО за всеки въпрос: първо викай list_legal_documents, за да видиш какви "
             "реални нормативни текстове са качени в библиотеката. Ако има релевантен документ -- "
-            "викай read_legal_document и цитирай ТОЧНИЯ член/алинея/точка от върнатия дословен "
-            "текст, вместо да разчиташ на общи познания. Ако няма качен релевантен документ (или "
-            "библиотеката е празна) -- отговори от общи познания, но ЗАДЪЛЖИТЕЛНО завърши отговора "
-            "си с изрично предупреждение, че преценката не е закотвена в конкретен качен източник и "
-            "трябва да се провери от юрист/КНОБ, преди оценителят да разчита на нея за реално "
-            "решение. Никога не представяй правно заключение като сигурно, освен ако не цитираш "
-            "буквално качен източник.\n\n"
+            "викай search_legal_document с конкретния въпрос на оценителя като query (НЕ чети "
+            "целия документ -- инструментът връща само релевантните членове/раздели) и цитирай "
+            "ТОЧНИЯ член/алинея/точка от върнатия дословен текст, вместо да разчиташ на общи "
+            "познания. Ако първото търсене не намери достатъчно -- викай search_legal_document "
+            "пак с по-различна/по-широка формулировка на query, преди да се откажеш. Ако няма качен "
+            "релевантен документ (или библиотеката е празна) -- отговори от общи познания, но "
+            "ЗАДЪЛЖИТЕЛНО завърши отговора си с изрично предупреждение, че преценката не е "
+            "закотвена в конкретен качен източник и трябва да се провери от юрист/КНОБ, преди "
+            "оценителят да разчита на нея за реално решение. Никога не представяй правно "
+            "заключение като сигурно, освен ако не цитираш буквално качен източник.\n\n"
             "Ако оценителят поиска да запишеш правна бележка/наблюдение в доклада -- викай "
             "propose_text_update с field='appraiser_notes', никога не пиши директно в отговора си "
             "вместо това."

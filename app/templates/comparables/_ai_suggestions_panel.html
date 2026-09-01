@@ -73,7 +73,7 @@
 </div>
 
 <form style="margin-top:0.75rem;display:flex;gap:0.5rem;align-items:center"
-      hx-post="/comparables/ai-generate"
+      hx-post="/comparables/ai-generate?report={{ report.id }}"
       hx-target="#ai-generation-slot"
       hx-swap="innerHTML">
   {% if models_by_provider %}
@@ -107,7 +107,7 @@
 <details style="margin-top:0.75rem">
   <summary class="hint" style="cursor:pointer">История на AI генерации за този доклад</summary>
   <div id="ai-history-content"
-       hx-get="/comparables/ai-history"
+       hx-get="/comparables/ai-history?report={{ report.id }}"
        hx-trigger="toggle once from:closest details"
        hx-target="this"
        hx-swap="innerHTML"

@@ -348,6 +348,12 @@ class AvmModel(Base):
     # NULL for segments where it showed no benefit (office).
     text_transformer_path = Column(Text)
 
+    # Global feature importance (Phase 14 Tier 2.3) -- top features by mean
+    # |SHAP value| over a sample of the training set, computed once at
+    # training time via shap.TreeExplainer on the LightGBM "point" model.
+    # NULL for models trained before this column existed.
+    shap_summary = Column(JSONB)
+
 
 class ListingEmbedding(Base):
     """Semantic-text embedding of one listing (app/services/llm/listing_doc.py
@@ -577,6 +583,32 @@ class MarketDocument(Base):
     extracted_data = Column(JSONB)
     error_message = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class LegalDocumentChunk(Base):
+    """One "Чл. N"/"Раздел N" section of an uploaded legal_standard
+    MarketDocument (Phase 14 Tier 3.1) -- mirrors ListingEmbedding's
+    pattern (separate table, not a column, keyed to support re-embedding
+    with a different model). Exists specifically to replace "read the
+    entire document" with "semantically search within it"
+    (search_legal_document in orchestrator_graph.py) -- a real uploaded
+    document measured at 350K+ characters cost 114,000+ input tokens for a
+    single full read, the exact problem this table exists to fix."""
+    __tablename__ = "legal_document_chunks"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    market_document_id = Column(UUID(as_uuid=True), ForeignKey("market_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    chunk_index = Column(Integer, nullable=False)
+    heading = Column(Text)   # e.g. "Чл. 12." -- NULL for a heading-less fallback chunk
+    text = Column(Text, nullable=False)
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
+    provider = Column(Text, nullable=False)
+    model = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("market_document_id", "chunk_index", "provider", "model", name="uq_legal_document_chunks_doc_idx_provider_model"),
+    )
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────

@@ -65,19 +65,40 @@ _VALID_REPORT_PURPOSES = {slug for slug, _ in get_purpose_options()}
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _active_report(request: Request, db: Session, user: User) -> AppraisalReport:
-    """Return the report stored in session, or find/create a draft for the user."""
-    rid_str = request.session.get("active_report_id")
+    """Return the active report for this request.
+
+    Resolution order (Phase 14 Tier 3.2, 2026-09-02): the `?report=` query
+    param, when present and owned by this user, wins over session -- this
+    is what makes two browser tabs on two different reports independent of
+    each other. Session remains the fallback for any request that doesn't
+    carry the param (a bookmarked/old link, an internal server-side call
+    that only has `request`), so nothing that worked before this change
+    stops working -- it only stops being the SOLE source of truth. Every
+    request that DOES resolve a report also re-syncs the session to match,
+    so the fallback path stays correct for whichever tab acted last.
+    """
+    rid_str = request.query_params.get("report") or request.session.get("active_report_id")
     if rid_str:
         try:
             rid = uuid.UUID(rid_str)
             report = get_report_for_user(db, rid, user.id)
             if report:
+                request.session["active_report_id"] = str(report.id)
                 return report
         except Exception:
             pass
     report = get_or_create_draft(db, user.id)
     request.session["active_report_id"] = str(report.id)
     return report
+
+
+def _comparables_redirect(report_id, anchor: str = "") -> RedirectResponse:
+    """Redirect back to /comparables/ carrying `?report=` forward -- a bare
+    redirect to "/comparables/" after a POST would silently fall back to
+    whatever the session currently points to, which may have changed if a
+    DIFFERENT tab acted in between (see _active_report's own docstring)."""
+    suffix = f"#{anchor}" if anchor else ""
+    return RedirectResponse(url=f"/comparables/?report={report_id}{suffix}", status_code=303)
 
 
 def _panel_response(request: Request, db: Session, ctype: str, report_id: uuid.UUID):
@@ -101,7 +122,7 @@ def _htmx_or_redirect(
 ):
     if request.headers.get("HX-Request"):
         return _panel_response(request, db, ctype, report_id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return _comparables_redirect(report_id)
 
 
 def _pool_item_guard(
@@ -129,7 +150,7 @@ async def comparables_page(
     # cold-start joblib.load) — offloaded to a worker thread so a slow
     # external response doesn't stall the single asyncio event loop for
     # every other concurrent request.
-    avm = await run_in_threadpool(avm_service.predict_sales_value, db, report)
+    avm = await run_in_threadpool(avm_service.predict_sales_value, db, report, explain=True)
     cadastre = await run_in_threadpool(gis_service.get_cadastre_panel_data, report)
     property_type_groups = [
         (SEGMENT_DISPLAY_NAMES[segment], [(slug, PROPERTY_TYPE_DISPLAY.get(slug, slug)) for slug in slugs])
@@ -508,7 +529,7 @@ async def add_comparables(
 ):
     report = _active_report(request, db, user)
     add_to_pool(db, listing_ids, comparable_type, report.id, user.id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return _comparables_redirect(report.id)
 
 
 @router.post("/remove/{pool_id}")
@@ -644,7 +665,7 @@ async def save_subject(
         "subject_cadastral_id": subject_cadastral_id.strip(),
         "report_purpose": report_purpose if report_purpose in _VALID_REPORT_PURPOSES else "",
     })
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return _comparables_redirect(report.id)
 
 
 @router.post("/new-report")
@@ -655,7 +676,7 @@ async def new_report_endpoint(
 ):
     report = new_draft(db, user.id)
     request.session["active_report_id"] = str(report.id)
-    return RedirectResponse(url="/comparables/", status_code=303)
+    return _comparables_redirect(report.id)
 
 
 # ── Export ────────────────────────────────────────────────────────────────────
@@ -707,7 +728,7 @@ async def save_income_approach(
         subject_area_sqm=_f(subject_area_sqm),
         discount_rate_pct=_f(discount_rate_pct),
     )
-    return RedirectResponse(url="/comparables/#income-panel", status_code=303)
+    return _comparables_redirect(report.id, "income-panel")
 
 
 @router.post("/save-sales")
@@ -730,7 +751,7 @@ async def save_sales_approach(
         concluded_value_sales=_f(concluded_value_sales),
         source="manual",
     )
-    return RedirectResponse(url="/comparables/#avm-panel", status_code=303)
+    return _comparables_redirect(report.id, "avm-panel")
 
 
 @router.post("/save-submarket-rationale")
@@ -742,7 +763,7 @@ async def save_submarket_rationale(
 ):
     report = _active_report(request, db, user)
     update_submarket_rationale(db, report.id, submarket_rationale.strip())
-    return RedirectResponse(url="/comparables/#tab-content-sale", status_code=303)
+    return _comparables_redirect(report.id, "tab-content-sale")
 
 
 @router.post("/save-income-rationale")
@@ -754,7 +775,7 @@ async def save_income_rationale(
 ):
     report = _active_report(request, db, user)
     update_income_market_rationale(db, report.id, income_market_rationale.strip())
-    return RedirectResponse(url="/comparables/#income-panel", status_code=303)
+    return _comparables_redirect(report.id, "income-panel")
 
 
 @router.post("/save-legal-description")
@@ -771,7 +792,7 @@ async def save_legal_description(
         text=legal_description.strip(),
         source=source if source in ("agkk", "manual") else "manual",
     )
-    return RedirectResponse(url="/comparables/#cadastre-panel", status_code=303)
+    return _comparables_redirect(report.id, "cadastre-panel")
 
 
 @router.post("/save-residual")
@@ -784,7 +805,7 @@ async def save_residual_approach(
     def _f(v): return float(v) if v.strip() else None
     report = _active_report(request, db, user)
     update_residual_approach(db, report.id, concluded_value_residual=_f(concluded_value_residual))
-    return RedirectResponse(url="/comparables/#residual-panel", status_code=303)
+    return _comparables_redirect(report.id, "residual-panel")
 
 
 @router.post("/save-conclusion")
@@ -806,7 +827,7 @@ async def save_conclusion(
         weight_residual_pct=_f(weight_residual_pct),
         weighting_rationale=weighting_rationale.strip(),
     )
-    return RedirectResponse(url="/comparables/#conclusion-panel", status_code=303)
+    return _comparables_redirect(report.id, "conclusion-panel")
 
 
 @router.get("/export/excel")

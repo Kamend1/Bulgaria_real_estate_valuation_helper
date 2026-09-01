@@ -121,7 +121,7 @@
   </div>
 
   <form id="chat-send-form" class="chat-input-row"
-        hx-post="/analyst/send" hx-target="#chat-messages" hx-swap="beforeend"
+        hx-post="/analyst/send?conv={{ conversation.id }}" hx-target="#chat-messages" hx-swap="beforeend"
         hx-on::after-request="this.reset(); document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight">
     <textarea name="message" id="chat-message-input" placeholder="Попитай нещо… (напр. „сравни кварталите на София за двустайни“, „времеви ред за офиси“)" required
               onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); this.closest('form').requestSubmit();}"></textarea>

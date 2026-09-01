@@ -36,7 +36,7 @@
     <div class="proposal-card">
       <div class="hint" style="margin-bottom:0.3rem">Предложение: {{ msg.parsed.field_label }}</div>
       <div class="chat-bubble" style="white-space:pre-line">{{ msg.parsed.text }}</div>
-      <form hx-post="/assistant/apply-proposal" hx-target="closest .proposal-card" hx-swap="beforeend"
+      <form hx-post="/assistant/apply-proposal?report={{ report.id }}" hx-target="closest .proposal-card" hx-swap="beforeend"
             style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem">
         <input type="hidden" name="field" value="{{ msg.parsed.field }}">
         <input type="hidden" name="text" value="{{ msg.parsed.text }}">

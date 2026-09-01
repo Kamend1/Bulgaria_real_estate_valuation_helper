@@ -105,24 +105,33 @@ def _conversation_context(db: Session, conversation: AgentConversation) -> dict:
 
 
 def _active_conversation(request: Request, db: Session, user: User, report) -> AgentConversation:
-    """Session-selected conversation for the report-scoped assistant
-    (Phase 12, 2026-08-31) -- mirrors comparables._active_report's shape
-    exactly: read session id -> ownership check -> fallback + write back.
-    Also re-validated against the CURRENTLY active report: if the
-    appraiser switches reports via _report_switcher.html, a conversation
-    id left over from the previous report is no longer a valid choice and
-    falls back to that new report's own default conversation instead."""
-    cid_str = request.session.get("active_assistant_conversation_id")
+    """Active conversation for the report-scoped assistant. `?conv=` query
+    param wins over session (Phase 14 Tier 3.2, 2026-09-02, mirroring
+    comparables._active_report's exact resolution order and rationale) --
+    session remains the fallback for requests that don't carry it. Also
+    re-validated against the CURRENTLY active report: if the appraiser
+    switches reports via _report_switcher.html, a conversation id left
+    over from the previous report is no longer a valid choice and falls
+    back to that new report's own default conversation instead."""
+    cid_str = request.query_params.get("conv") or request.session.get("active_assistant_conversation_id")
     if cid_str:
         try:
             conv = get_conversation_for_user(db, uuid.UUID(cid_str), user.id)
             if conv and conv.agent_type == "report_assistant" and conv.report_id == report.id:
+                request.session["active_assistant_conversation_id"] = str(conv.id)
                 return conv
         except Exception:
             pass
     conv = get_or_create_conversation(db, report.id, user.id)
     request.session["active_assistant_conversation_id"] = str(conv.id)
     return conv
+
+
+def _assistant_redirect(report_id, conversation_id) -> RedirectResponse:
+    """Redirect back to /assistant/ carrying both `?report=` and `?conv=`
+    forward -- see _active_report/_active_conversation's own docstrings for
+    why a bare redirect would silently fall back to session."""
+    return RedirectResponse(url=f"/assistant/?report={report_id}&conv={conversation_id}", status_code=303)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -142,7 +151,7 @@ async def assistant_page(
             "conversation": conversation,
             "conversations": list_conversations(db, user.id, agent_type="report_assistant", report_id=report.id),
             "conversation_open_url_prefix": "/assistant/conversations",
-            "conversation_new_url": "/assistant/conversations/new",
+            "conversation_new_url": f"/assistant/conversations/new?report={report.id}",
             "configured_providers": list_configured_providers(),
             "default_provider": settings.llm_default_provider,
             "default_model": get_default_model(settings.llm_default_provider),
@@ -166,7 +175,7 @@ async def new_conversation_route(
     report = _active_report(request, db, user)
     conv = new_conversation(db, user.id, agent_type="report_assistant", report_id=report.id)
     request.session["active_assistant_conversation_id"] = str(conv.id)
-    return RedirectResponse(url="/assistant/", status_code=303)
+    return _assistant_redirect(report.id, conv.id)
 
 
 @router.post("/conversations/{conversation_id}/open")
@@ -183,9 +192,10 @@ async def open_conversation_route(
     # Keep the two selectors consistent -- opening a conversation that
     # belongs to a different report than the currently active one also
     # switches the active report, so /comparables/ and this page agree.
-    if conv.report_id:
-        request.session["active_report_id"] = str(conv.report_id)
-    return RedirectResponse(url="/assistant/", status_code=303)
+    report_id = conv.report_id
+    if report_id:
+        request.session["active_report_id"] = str(report_id)
+    return _assistant_redirect(report_id, conv.id)
 
 
 @router.post("/conversations/{conversation_id}/rename")
@@ -294,7 +304,8 @@ async def send_message(
     )
     thread.start()
     return templates.TemplateResponse(
-        request, "assistant/_progress.html", {"turn_id": turn_id, "user_message": message},
+        request, "assistant/_progress.html",
+        {"turn_id": turn_id, "user_message": message, "report": report, "conversation": conversation},
     )
 
 
@@ -341,7 +352,7 @@ async def messages_partial(
     report = _active_report(request, db, user)
     conversation = _active_conversation(request, db, user, report)
     ctx = _conversation_context(db, conversation)
-    return templates.TemplateResponse(request, "assistant/_messages.html", ctx)
+    return templates.TemplateResponse(request, "assistant/_messages.html", {"report": report, **ctx})
 
 
 @router.post("/apply-proposal", response_class=HTMLResponse)

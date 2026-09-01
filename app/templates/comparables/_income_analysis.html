@@ -180,7 +180,7 @@
   <!-- ── Income market rationale (Phase 7, Tier 5) ─────────── -->
   <details style="margin:0.6rem 0" {% if report.income_market_rationale %}open{% endif %}>
     <summary class="hint" style="cursor:pointer">Обосновка на пазарния подход по доходи</summary>
-    <form method="post" action="/comparables/save-income-rationale" style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:flex-start">
+    <form method="post" action="/comparables/save-income-rationale?report={{ report.id }}" style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:flex-start">
       <textarea name="income_market_rationale" rows="2" style="flex:1"
                 placeholder="Напр. защо са избрани точно тези наемни сравними, обосновка на допусканията в DCF">{{ report.income_market_rationale or '' }}</textarea>
       <button type="submit" class="btn-clear btn-sm">Запази</button>
@@ -222,7 +222,7 @@
         <label class="income-label">Обща стойност</label>
         <div class="res-computed res-computed-hl" id="save-inc-total-display">—</div>
       </div>
-      <form method="post" action="/comparables/save-income" id="income-save-form" style="display:flex;align-items:flex-end">
+      <form method="post" action="/comparables/save-income?report={{ report.id }}" id="income-save-form" style="display:flex;align-items:flex-end">
         <input type="hidden" name="rent_per_sqm_month"    id="frm-inc-rent">
         <input type="hidden" name="cap_rate_pct"          id="frm-inc-caprate">
         <input type="hidden" name="sale_price_per_sqm"    id="frm-inc-sale">

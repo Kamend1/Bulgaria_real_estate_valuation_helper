@@ -46,6 +46,31 @@
     въз основа на реални сравними, в панела по-долу.
   </p>
 
+  {% if avm.shap_top_factors %}
+  <details style="margin-top:0.75rem">
+    <summary class="hint" style="cursor:pointer">Защо тази прогноза? (топ фактори)</summary>
+    <div style="margin-top:0.5rem">
+      {% set max_abs = avm.shap_top_factors | map(attribute='shap_value') | map('abs') | max %}
+      {% for f in avm.shap_top_factors %}
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;font-size:0.82rem">
+        <span style="flex:0 0 40%;text-align:right;color:var(--muted)">{{ f.feature }}</span>
+        <div style="flex:1;background:var(--border);border-radius:3px;height:0.9rem;position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;bottom:0;{{ 'left:50%' if f.shap_value >= 0 else 'right:50%' }};
+                      width:{{ ((f.shap_value | abs) / max_abs * 50) if max_abs else 0 }}%;
+                      background:{{ '#2f7d4f' if f.shap_value >= 0 else '#b23b3b' }}"></div>
+        </div>
+        <span style="flex:0 0 4.5rem;font-family:monospace">{{ '%+.3f' % f.shap_value }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="hint" style="margin-top:0.35rem">
+      Принос на всеки фактор към прогнозата на модела спрямо базовата му стойност
+      {% if avm.shap_scale == 'log1p' %}(в логаритмичен мащаб на модела, не директно в EUR/кв.м){% endif %}.
+      Зелено = повишава прогнозата, червено = понижава я. Само LightGBM частта на модела.
+    </p>
+  </details>
+  {% endif %}
+
   {% else %}
 
   <div class="badge badge-warn" style="display:inline-block;margin-bottom:0.75rem">
@@ -96,7 +121,7 @@
       Закачено в доклада: <strong>{{ report.concluded_value_sales | format_number }} EUR</strong>
     </div>
     {% endif %}
-    <form method="post" action="/comparables/save-sales" class="approach-save-row">
+    <form method="post" action="/comparables/save-sales?report={{ report.id }}" class="approach-save-row">
       <div class="income-group">
         <label class="income-label">Заключена стойност по пазарен подход (ръчно)</label>
         <input type="number" name="concluded_value_sales" step="1" min="0"

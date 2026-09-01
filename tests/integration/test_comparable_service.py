@@ -314,6 +314,77 @@ def test_generate_docx_always_includes_limiting_conditions_appendix(db_session):
     assert "Ограничаващи условия и допускания" in text
 
 
+def test_generate_docx_omits_document_attachments_appendix_when_none_uploaded(db_session):
+    report = _make_report(db_session)
+    text = _docx_text(db_session, report)
+    assert "Снимки и документи от доклада" not in text
+
+
+def test_generate_docx_embeds_uploaded_photo_and_pdf_as_images(db_session, tmp_path):
+    from PIL import Image
+    import fitz
+
+    from app.db.models import ReportDocument
+    from app.services import documents as documents_service
+
+    report = _make_report(db_session)
+    storage_dir = documents_service.storage_dir()
+    photo_name = f"test_attach_{uuid.uuid4().hex}.jpg"
+    pdf_name = f"test_attach_{uuid.uuid4().hex}.pdf"
+    photo_path = storage_dir / photo_name
+    pdf_path = storage_dir / pdf_name
+    try:
+        Image.new("RGB", (40, 30), color=(10, 20, 30)).save(photo_path, format="JPEG")
+        pdf_doc = fitz.open()
+        pdf_doc.new_page()
+        pdf_doc.save(str(pdf_path))
+        pdf_doc.close()
+
+        db_session.add(ReportDocument(
+            report_id=report.id, filename="снимка.jpg", document_type="site_photo",
+            storage_path=photo_name, mime_type="image/jpeg", status="ready",
+        ))
+        db_session.add(ReportDocument(
+            report_id=report.id, filename="акт.pdf", document_type="notarial_act",
+            storage_path=pdf_name, mime_type="application/pdf", status="ready",
+        ))
+        # A "processing" row must be skipped -- only status="ready" belongs in the export.
+        db_session.add(ReportDocument(
+            report_id=report.id, filename="still_processing.jpg", document_type="site_photo",
+            storage_path="does-not-matter", mime_type="image/jpeg", status="processing",
+        ))
+        db_session.commit()
+
+        buf = comparable_service.generate_docx(db_session, report)
+        doc = Document(buf)
+        text = "\n".join(p.text for p in doc.paragraphs)
+
+        assert "Снимки и документи от доклада" in text
+        assert "снимка.jpg" in text
+        assert "акт.pdf" in text
+        assert "still_processing.jpg" not in text
+        assert len(doc.inline_shapes) == 2
+    finally:
+        photo_path.unlink(missing_ok=True)
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_generate_docx_lists_unsupported_attachment_type_without_crashing(db_session):
+    from app.db.models import ReportDocument
+
+    report = _make_report(db_session)
+    db_session.add(ReportDocument(
+        report_id=report.id, filename="договор.docx", document_type="lease_agreement",
+        storage_path="does-not-exist-on-disk.docx",
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        status="ready",
+    ))
+    db_session.commit()
+
+    text = _docx_text(db_session, report)
+    assert "договор.docx" in text
+
+
 def test_generate_docx_includes_legal_section_only_when_present(db_session):
     with_legal = _make_report(db_session, legal_description="Тестов правен текст за проверка.")
     without_legal = _make_report(db_session)

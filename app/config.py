@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     r2_maintainer_secret_access_key: str = ""
     r2_backups_bucket_name: str = ""
 
+    # Automatic AVM retraining (Phase 14 Tier 2.1) — only ever runs on a
+    # machine that already holds R2_MAINTAINER_* above (the same gate used
+    # for the manual --push-to-r2 CLI), so this stays admin/maintainer-only
+    # by construction, not by a role check. A segment retrains when its
+    # training_eligible row count has grown by at least this percentage
+    # since the currently active model was trained.
+    avm_auto_retrain_growth_pct: float = 20.0
+
     # AI-assisted valuation (Phase 7 — app/services/llm/). Real secret, .env
     # only — unlike R2_MODELS_* above, this is the owner's own billed API
     # key, not a scoped read-only credential, so it never gets a real value

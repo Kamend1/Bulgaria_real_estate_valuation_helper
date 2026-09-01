@@ -15,8 +15,10 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.db.models import AppraisalReport, ComparablePool
+from app.db.models import AppraisalReport, ComparablePool, ReportDocument
+from app.services import documents as documents_service
 from app.services.analytics_service import get_market_trend
+from app.services.llm.doc_extraction import render_pdf_pages_as_png
 from utils.feature_engineering import PROPERTY_TYPE_DISPLAY
 
 MAX_PINNED = 6   # max pinned-for-report per type (Word table limit)
@@ -512,6 +514,66 @@ def _market_context_paragraph(db: Session, report: AppraisalReport) -> str | Non
 
 # ── Word / DOCX report generation ────────────────────────────────────────────
 
+def _write_document_attachments(doc: Document, db: Session, report: AppraisalReport) -> None:
+    """Appendix embedding whatever the appraiser already uploaded to this
+    report (report_documents -- site photos, scanned notarial acts, etc.)
+    as images (Phase 14 Tier 2.2). Word only, deliberately -- Excel is a
+    working spreadsheet, not a document meant to carry visual attachments.
+
+    An image file embeds directly; a PDF renders its first page via the
+    same render_pdf_pages_as_png helper the AI document reader already uses
+    (Phase 7's PyMuPDF dependency, reused here rather than added new). Any
+    other file type (e.g. the original .docx of a scanned document) is
+    listed by name only -- embedding a Word file inside a Word file isn't
+    practical with python-docx. The appraiser's own official certificate
+    file has no upload path yet (only the certificate NUMBER field exists,
+    see User.appraiser_certificate_no) -- that stays a separate, future
+    feature, not addressed here.
+    """
+    docs = (
+        db.query(ReportDocument)
+        .filter(ReportDocument.report_id == report.id, ReportDocument.status == "ready")
+        .order_by(ReportDocument.created_at.asc())
+        .all()
+    )
+    if not docs:
+        return
+
+    doc.add_page_break()
+    h = doc.add_heading("Приложение — Снимки и документи от доклада", level=1)
+    if h.runs:
+        h.runs[0].font.color.rgb = _BRAND_DARK
+
+    base_dir = documents_service.storage_dir()
+    for d in docs:
+        file_path = base_dir / d.storage_path
+        label = documents_service.DOCUMENT_TYPE_LABELS.get(d.document_type, d.document_type)
+        p_cap = doc.add_paragraph()
+        r_cap = p_cap.add_run(f"{d.filename}  ({label})")
+        r_cap.bold = True
+        r_cap.font.size = Pt(9)
+        r_cap.font.color.rgb = _MUTED
+
+        if not file_path.exists():
+            doc.add_paragraph("Файлът не е намерен на диска.").runs[0].font.size = Pt(9)
+            continue
+
+        try:
+            if (d.mime_type or "").startswith("image/"):
+                doc.add_picture(str(file_path), width=Cm(15))
+            elif (d.mime_type or "") == "application/pdf" or file_path.suffix.lower() == ".pdf":
+                pages = render_pdf_pages_as_png(file_path, max_pages=1)
+                if pages:
+                    doc.add_picture(io.BytesIO(pages[0]), width=Cm(15))
+                else:
+                    doc.add_paragraph("(празен PDF)").runs[0].font.size = Pt(9)
+            else:
+                doc.add_paragraph("(файлът не се вгражда автоматично в този формат)").runs[0].font.size = Pt(9)
+        except Exception as exc:
+            doc.add_paragraph(f"(грешка при вграждане: {exc})").runs[0].font.size = Pt(9)
+        doc.add_paragraph()
+
+
 def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
     pool_sale = get_pool_with_stats(db, "sale", report.id)
     pool_rent = get_pool_with_stats(db, "rent", report.id)
@@ -901,6 +963,8 @@ def generate_docx(db: Session, report: AppraisalReport) -> io.BytesIO:
         h_lc.runs[0].font.color.rgb = _BRAND_DARK
     p_lc = doc.add_paragraph(_LIMITING_CONDITIONS_TEXT)
     p_lc.runs[0].font.size = Pt(9.5)
+
+    _write_document_attachments(doc, db, report)
 
     buf = io.BytesIO()
     doc.save(buf)

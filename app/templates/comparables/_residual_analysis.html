@@ -234,7 +234,7 @@
             <label class="income-label">Остатъчна стойност на парцела</label>
             <div class="res-computed res-computed-hl" id="save-res-display">—</div>
           </div>
-          <form method="post" action="/comparables/save-residual" id="residual-save-form"
+          <form method="post" action="/comparables/save-residual?report={{ report.id }}" id="residual-save-form"
                 style="display:flex;align-items:flex-end">
             <input type="hidden" name="concluded_value_residual" id="frm-res-total">
             <button type="submit" id="btn-save-residual" class="btn-primary" disabled

@@ -19,13 +19,13 @@
     <h1 style="margin:0">{{ report.title }}</h1>
   </div>
   <div class="toolbar">
-    <a href="/comparables/export/excel" class="btn-export btn-export--excel">
+    <a href="/comparables/export/excel?report={{ report.id }}" class="btn-export btn-export--excel">
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-7 14H8v-2h4v2zm0-4H8v-2h4v2zm0-4H8V7h4v2zm5 8h-4v-2h4v2zm0-4h-4v-2h4v2zm0-4h-4V7h4v2z"/>
       </svg>
       Excel
     </a>
-    <a href="/comparables/export/docx" class="btn-export btn-export--word">
+    <a href="/comparables/export/docx?report={{ report.id }}" class="btn-export btn-export--word">
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15h8v2H8v-2zm0-4h8v2H8v-2zm0-4h4v2H8V7z"/>
       </svg>
@@ -55,7 +55,7 @@
 <!-- Subject property form -->
 <section class="card" style="margin-bottom:1.2rem">
   <h2>Оценяван имот</h2>
-  <form action="/comparables/subject" method="post">
+  <form action="/comparables/subject?report={{ report.id }}" method="post">
     <div class="subject-grid">
       <div class="form-group">
         <label>Заглавие на доклада</label>
@@ -181,7 +181,7 @@
 
     <details style="margin-bottom:0.6rem" {% if report.submarket_rationale %}open{% endif %}>
       <summary class="hint" style="cursor:pointer">Обосновка на избраната съпоставима зона / сравними</summary>
-      <form method="post" action="/comparables/save-submarket-rationale" style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:flex-start">
+      <form method="post" action="/comparables/save-submarket-rationale?report={{ report.id }}" style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:flex-start">
         <textarea name="submarket_rationale" rows="2" style="flex:1"
                   placeholder="Напр. защо са избрани точно тези сравними/подрайон, а не по-скъпи/евтини съседни зони">{{ report.submarket_rationale or '' }}</textarea>
         <button type="submit" class="btn-clear btn-sm">Запази</button>
@@ -238,7 +238,7 @@
       Покажи AI-предложени сравними (семантично търсене — прави реална заявка към AI доставчика)
     </summary>
     <div id="ai-suggestions-content"
-         hx-get="/comparables/ai-suggestions"
+         hx-get="/comparables/ai-suggestions?report={{ report.id }}"
          hx-trigger="toggle once from:closest details"
          hx-target="this"
          hx-swap="innerHTML"

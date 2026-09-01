@@ -71,7 +71,7 @@
   </div>
 
   <div class="approach-save-bar" style="margin-top:0.75rem">
-    <form method="post" action="/comparables/save-conclusion" id="conclusion-save-form" class="approach-save-row">
+    <form method="post" action="/comparables/save-conclusion?report={{ report.id }}" id="conclusion-save-form" class="approach-save-row">
       <input type="hidden" name="weight_sales_pct" id="frm-concl-w-sales">
       <input type="hidden" name="weight_income_pct" id="frm-concl-w-income">
       <input type="hidden" name="weight_residual_pct" id="frm-concl-w-residual">

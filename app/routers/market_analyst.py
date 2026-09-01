@@ -75,20 +75,27 @@ def _conversation_context(db: Session, conversation: AgentConversation) -> dict:
 
 
 def _active_analyst_conversation(request: Request, db: Session, user: User) -> AgentConversation:
-    """Session-selected market-analyst conversation (Phase 12, 2026-08-31)
-    -- mirrors assistant.py's _active_conversation, minus the report
-    re-validation (this agent has no report to re-check against)."""
-    cid_str = request.session.get("active_analyst_conversation_id")
+    """Active market-analyst conversation. `?conv=` query param wins over
+    session (Phase 14 Tier 3.2, 2026-09-02 -- mirrors assistant.py's
+    _active_conversation/comparables._active_report exact resolution order
+    and rationale), minus the report re-validation (this agent has no
+    report to re-check against)."""
+    cid_str = request.query_params.get("conv") or request.session.get("active_analyst_conversation_id")
     if cid_str:
         try:
             conv = get_conversation_for_user(db, uuid.UUID(cid_str), user.id)
             if conv and conv.agent_type == "market_analyst":
+                request.session["active_analyst_conversation_id"] = str(conv.id)
                 return conv
         except Exception:
             pass
     conv = get_or_create_analyst_conversation(db, user.id)
     request.session["active_analyst_conversation_id"] = str(conv.id)
     return conv
+
+
+def _analyst_redirect(conversation_id) -> RedirectResponse:
+    return RedirectResponse(url=f"/analyst/?conv={conversation_id}", status_code=303)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -106,7 +113,7 @@ async def analyst_page(
             "conversation": conversation,
             "conversations": list_analyst_conversations(db, user.id),
             "conversation_open_url_prefix": "/analyst/conversations",
-            "conversation_new_url": "/analyst/conversations/new",
+            "conversation_new_url": "/analyst/conversations/new",   # no report param -- this agent is report-agnostic
             "configured_providers": list_configured_providers(),
             "default_provider": settings.llm_default_provider,
             "default_model": get_default_model(settings.llm_default_provider),
@@ -127,7 +134,7 @@ async def new_conversation_route(
 ):
     conv = new_analyst_conversation(db, user.id)
     request.session["active_analyst_conversation_id"] = str(conv.id)
-    return RedirectResponse(url="/analyst/", status_code=303)
+    return _analyst_redirect(conv.id)
 
 
 @router.post("/conversations/{conversation_id}/open")
@@ -141,7 +148,7 @@ async def open_conversation_route(
     if not conv or conv.agent_type != "market_analyst":
         raise HTTPException(status_code=404)
     request.session["active_analyst_conversation_id"] = str(conv.id)
-    return RedirectResponse(url="/analyst/", status_code=303)
+    return _analyst_redirect(conv.id)
 
 
 @router.post("/conversations/{conversation_id}/rename")
@@ -243,7 +250,7 @@ async def send_message(
     )
     thread.start()
     return templates.TemplateResponse(
-        request, "market_analyst/_progress.html", {"turn_id": turn_id, "user_message": message},
+        request, "market_analyst/_progress.html", {"turn_id": turn_id, "user_message": message, "conversation": conversation},
     )
 
 

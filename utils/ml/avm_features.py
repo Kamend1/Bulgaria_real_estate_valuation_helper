@@ -73,6 +73,48 @@ REQUIRED_SUBJECT_FIELDS = [
     "subject_area_sqm", "subject_city", "subject_property_type", "subject_geo_category",
 ]
 
+# ── SHAP feature-name display (Phase 14 Tier 2.3) ────────────────────────────
+# ColumnTransformer.get_feature_names_out() returns names like
+# "num__area_sqm" or "cat__geo_category_small_city" (transformer prefix +
+# original column, one-hot categories appended with no separator marker) --
+# not something to show an appraiser directly. Shared here so both training
+# (global summary) and serving (per-prediction explanation) render the same
+# labels for the same underlying column.
+_BASE_COL_LABELS = {
+    "area_sqm": "Площ",
+    "views": "Брой прегледи",
+    "features_count": "Брой удобства",
+    "construction_year_model": "Година на строеж",
+    "floor_model": "Етаж",
+    "total_floors_model": "Общо етажи в сградата",
+    "property_type_raw": "Тип имот",
+    "title_city_model": "Град",
+    "title_geo_2_model": "Квартал",
+    "geo_category": "Гео-категория",
+    "construction_type_model": "Строителство",
+}
+# Longest-first so a substring match (e.g. "geo_category" inside
+# "geo_category_small_city") doesn't shadow a longer, more specific column.
+_CATEGORICAL_COLS_BY_LEN = sorted(CATEGORICAL_COLS, key=len, reverse=True)
+
+
+def clean_shap_feature_name(name: str) -> str:
+    prefix, _, rest = name.partition("__")
+    if prefix not in ("num", "cat", "bin"):
+        return name
+    if prefix == "num" and rest.startswith("txt_tfidf"):
+        idx = rest.rsplit("_", 1)[-1]
+        return f"Текстово описание (компонента {idx})"
+    if prefix == "cat":
+        for col in _CATEGORICAL_COLS_BY_LEN:
+            if rest.startswith(col + "_"):
+                category = rest[len(col) + 1:]
+                return f"{_BASE_COL_LABELS.get(col, col)}: {category}"
+        return rest
+    if prefix == "bin":
+        return rest.replace("feature_", "").replace("_", " ").strip().capitalize() or rest
+    return _BASE_COL_LABELS.get(rest, rest)
+
 
 def missing_subject_fields(report) -> list[str]:
     """Required AppraisalReport fields that are empty. Empty list = ready to predict."""
