@@ -183,8 +183,37 @@ def _build_tool_loop(
                 messages.append(ToolMessage(content=result_json, tool_call_id=call["id"]))
                 on_message("tool", result_json, None, call["id"])
         else:
-            final_text = ""
-            on_progress("Достигнат лимит на стъпките за този специалист.")
+            # Every one of max_iterations rounds called a tool again --
+            # never happened to land on a plain-text final answer (real
+            # incident 2026-09-10: a broad "as many breakdowns as possible"
+            # request kept the model calling query_market_stats past the
+            # cap). Silently returning "" here used to leave the appraiser
+            # with a fully empty turn -- no message, no error, nothing --
+            # after the tool calls had already done real, billed work.
+            # Force ONE bounded synthesis call (tools unbound, so it CAN'T
+            # keep querying) instructing it to write up what it already
+            # gathered instead of reaching for more data.
+            on_progress("Достигнат лимит на стъпките -- обобщавам наличните находки…")
+            messages.append(SystemMessage(content=(
+                "Достигна лимита на стъпките с инструменти за тази реплика -- спри да викаш "
+                "инструменти. Напиши свързан отговор, обобщаващ всичко полезно, което вече "
+                "научи от изпълнените по-горе резултати от инструменти, дори ако не е пълно."
+            )))
+            chunk_accum = None
+            last_usage = {}
+            for chunk in chat_model.stream(messages):
+                chunk_accum = chunk if chunk_accum is None else chunk_accum + chunk
+                if chunk.usage_metadata:
+                    last_usage = chunk.usage_metadata
+            response = chunk_accum
+            call_log.append({
+                "call_label": f"{call_label_prefix}_synthesis",
+                "input_tokens": last_usage.get("input_tokens", 0),
+                "output_tokens": last_usage.get("output_tokens", 0),
+            })
+            final_text = _extract_text(response.content) if response is not None else ""
+            on_message("assistant", final_text, None, None, is_length_truncated(response) if response is not None else False)
+            persist_finding(db, report_id, domain, memory_source, memory_source_id, final_text)
 
         return {"findings": {**state.get("findings", {}), domain: final_text}, "hops": state.get("hops", 0) + 1}
 

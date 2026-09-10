@@ -18,12 +18,18 @@
     <div class="chat-bubble">{{ msg.content }}</div>
   </div>
 
-  {% elif msg.role == "assistant" and msg.content %}
+  {% elif msg.role == "assistant" and (msg.content or msg.truncated) %}
   <div class="chat-msg chat-msg-assistant">
+    {% if msg.content %}
     <div class="chat-bubble" style="white-space:pre-line">{{ msg.content }}</div>
+    {% endif %}
     {% if msg.truncated %}
     <div class="alert alert-warn" style="margin-top:0.4rem">
+      {% if not msg.content %}
+      Моделът не успя да генерира видим текст преди да достигне лимита за дължина на отговора.
+      {% else %}
       Отговорът е прекъснат поради лимита за дължина на отговора, не е завършен.
+      {% endif %}
       Вдигни "Макс. дължина на отговора" в параметрите на модела за по-дълги отговори,
       или
       <button type="button" class="btn-secondary btn-sm"
