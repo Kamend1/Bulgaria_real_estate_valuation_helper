@@ -80,13 +80,22 @@ def save_upload(uploaded_by: int, filename: str, file_bytes: bytes) -> str:
 
 def _extract_structured_facts(text: str, document_type: str, provider: str | None, model: str | None) -> dict:
     label = DOCUMENT_TYPE_LABELS.get(document_type, document_type)
-    chat = get_chat_model(provider, model, max_tokens=1500)
+    # 1500 was too tight in practice: a dense market report (retail/hotel/
+    # macro overview PDFs, real failures 2026-09-10) has enough candidate
+    # figures/claims that the model fills the whole budget mid-structured-
+    # output and with_structured_output can't parse the truncated tool
+    # call -- a hard failure, not a graceful degrade. 4000 gives real
+    # headroom; the explicit "up to ~12" caps below keep the model from
+    # just filling whatever budget it's given on an unusually dense report.
+    chat = get_chat_model(provider, model, max_tokens=4000)
     structured = chat.with_structured_output(MarketDocumentFacts)
     system = (
         f"Извлечи фактите от този документ ({label}), релевантен за пазара на недвижими имоти "
         "в България. Ползвай само това, което реално пише в текста -- не допълвай и не "
         "предполагай. Обърни особено внимание на конкретни цифри/проценти/тенденции и "
-        "географския им обхват -- те са най-полезни за сравнение с реални пазарни данни по-късно."
+        "географския им обхват -- те са най-полезни за сравнение с реални пазарни данни по-късно. "
+        "Ограничи key_claims и cited_figures до най-важните до около 12 елемента всеки -- избери "
+        "най-съществените, не се опитвай да изредиш всичко от документа."
     )
     result = structured.invoke([SystemMessage(content=system), HumanMessage(content=text[:20000])])
     return result.model_dump()
