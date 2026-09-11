@@ -339,6 +339,31 @@ def main():
             capture.append_log(_skip_msg)
             _db_update(run_uuid, last_message=_skip_msg)
 
+        # ── Analytics ─────────────────────────────────────────────────────────────────────────
+        # Detect price changes vs. each listing's previous snapshot + refresh
+        # the mv_analytics_flat materialized view the market analyst/AI tools
+        # query. Non-fatal, same reasoning as embeddings below.
+        #
+        # Historical note, same root cause as the embeddings note below (found
+        # 2026-09-11 while diagnosing why AVM auto-retraining never fired for
+        # a real scrape): this step, and the AVM retrain step further down,
+        # were both added only to scrape_service.run_scrape_background(), the
+        # confirmed-dead function this exact comment already flags for
+        # embeddings -- real scrapes have never run either step as a result.
+        if ingested > 0:
+            capture.append_log("─── Фаза: анализ на ценови промени ───")
+            _db_update(run_uuid, phase="analytics", last_message="Изчисляване на ценови промени…")
+            try:
+                from app.services.analytics_service import compute_price_events, refresh_mv
+
+                n_events = compute_price_events(run_uuid)
+                capture.append_log(f"Ценови събития: {n_events}. Обновяване на аналитичен изглед…")
+                _db_update(run_uuid, last_message=f"Ценови събития: {n_events}. Обновяване на аналитичен изглед…")
+                refresh_mv()
+                capture.append_log("Аналитичният изглед е обновен.")
+            except Exception as _ae:
+                capture.append_log(f"Предупреждение: аналитиката не се обнови ({_ae})")
+
         # ── Embeddings ────────────────────────────────────────────────────────────────────────
         # Re-embed listings touched by this run (new, or changed since last
         # embedded) -- feeds the AI-assisted valuation RAG panel and the AI
@@ -369,6 +394,28 @@ def main():
                 capture.append_log(f"Embeddings: {n_embedded} обяви ембед-нати/обновени.")
             except Exception as _ee:
                 capture.append_log(f"Предупреждение: embeddings не се обновиха ({_ee})")
+
+        # ── AVM retrain ───────────────────────────────────────────────────────────────────────
+        # Unconditional retrain of every segment (2026-09-11), gated only by
+        # R2_MAINTAINER_* being present on this machine -- see
+        # app/services/avm_retrain_service.py's own docstring.
+        if ingested > 0:
+            capture.append_log("─── Фаза: AVM пре-трениране ───")
+            _db_update(run_uuid, phase="avm_retrain", last_message="AVM пре-трениране…")
+            try:
+                from app.services.avm_retrain_service import maybe_retrain_avm_models
+
+                def _avm_progress(msg: str) -> None:
+                    capture.append_log(msg)
+                    _db_update(run_uuid, last_message=msg)
+
+                with db_session() as s:
+                    retrain_results = maybe_retrain_avm_models(s, on_progress=_avm_progress)
+                retrained = [r["segment"] for r in retrain_results if r["action"] == "retrained"]
+                if retrained:
+                    capture.append_log(f"AVM пре-трениране: {', '.join(retrained)}.")
+            except Exception as _re:
+                capture.append_log(f"Предупреждение: AVM пре-трениране не се изпълни ({_re})")
 
         # ── Done ────────────────────────────────────────────────────────────────────────────────
         done_msg = f"Готово. Вписани: {ingested}, Архивирани: {archived}"

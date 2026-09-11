@@ -157,7 +157,11 @@ app/
                        #   suggestions/generation/history, approaches, export
     reports.py
   services/
-    scrape_service.py      # ProgressCapture, run_scrape_background, _ingest_rows_to_db
+    scrape_service.py      # shared helpers used by scripts/run_scrape.py:
+                            #   _ingest_rows_to_db/_ingest_csv_to_db, sync_taxonomy_to_db,
+                            #   get_scrape_status -- NOT an orchestrator itself, see
+                            #   "Scrape pipeline and progress" below
+    avm_retrain_service.py # maybe_retrain_avm_models -- called from scripts/run_scrape.py
     listing_service.py     # search_listings filters (incl. construction_year/floor)
     analytics_service.py   # mv_analytics_flat aggregation, market trend
     avm_service.py, gis_service.py, comparable_service.py
@@ -177,8 +181,12 @@ app/
                        #   _ai_suggestions_panel, _ai_generation_result,
                        #   _ai_history, _conclusion_panel, _income_analysis, ...
 scripts/
+  run_scrape.py           # THE real scrape pipeline -- launched as its own OS
+                          #   process via subprocess.Popen from app/routers/scrape.py;
+                          #   see "Scrape pipeline and progress" below
   import_historical_data.py, train_avm_model.py, embed_listings.py,
-  backup_to_r2.py, prune_old_models.py, lookup_parcel.py, create_admin.py
+  backup_to_r2.py, prune_old_models.py, lookup_parcel.py, create_admin.py,
+  recover_scrape_run.py   # one-off: retry a scrape run's failed downloads + re-ingest
 alembic/
   versions/            # 0001 initial schema ... 0021 (latest) perf indexes;
                        #   0019 adds pgvector + listing_embeddings/ai_valuation_runs
@@ -195,6 +203,8 @@ static/app.css
 - `geo_category` and `deal_type_normalized` ("sale"/"rent") are indexed for fast filtering; a partial composite index (`property_type_slug, geo_category, last_seen_at DESC WHERE status='active'`) backs the listings search page specifically
 - `listing_embeddings` is a separate table (not a `listings` column), keyed by `(listing_id, provider, model)` — supports re-embedding with a different model without a schema change; has an HNSW index (`vector_cosine_ops`)
 
-### SSE scrape progress
+### Scrape pipeline and progress (corrected 2026-09-11 — see note below)
 
-Background thread (`threading.Thread(daemon=True)`) runs the scrape. `ProgressCapture` wraps stdout and parses print lines from the existing utils with regex to extract route/listing counts. `GET /scrape/progress/{run_id}` streams SSE events to the browser's `EventSource`. Thread is NOT a FastAPI BackgroundTask (timeouts). At the end of a run it also runs analytics refresh + embedding backfill (both non-fatal — a failure there logs a warning but doesn't fail the scrape).
+A real scrape runs as a **separate OS process**, not a thread: `app/routers/scrape.py` launches it with `subprocess.Popen([sys.executable, "-m", "scripts.run_scrape", "--run-id", run_id])`. `scripts/run_scrape.py` is the actual pipeline — taxonomy refresh → route discovery → download+parse → DB ingest → archive stale listings → analytics refresh (`compute_price_events`/`refresh_mv`) → embeddings backfill (`embed_backfill.backfill_embeddings`) → AVM retrain (`avm_retrain_service.maybe_retrain_avm_models`) — writing its own progress directly to `scrape_runs` columns (`phase`, `last_message`, `listings_ingested`, `last_heartbeat_at`, ...) via raw SQL `UPDATE`s, plus a dedicated heartbeat thread so a dead process is detectable even with no recent log line. `GET /scrape/progress/{run_id}` is a **DB-polling** SSE endpoint (`app/routers/scrape.py::progress_sse`) — it re-queries `scrape_runs` every second and streams the row as the event; it does not read from any in-process state, so it "survives uvicorn restarts" by design.
+
+> **Historical note:** `app/services/scrape_service.py` used to also define `run_scrape_background()` — an independent, thread-based copy of this same pipeline (with its own `ProgressCapture`/in-memory `progress_store` push mechanism) that **no code anywhere ever called**. Two different "runs automatically on every scrape" features (embeddings backfill, then AVM retraining) were each added there first, by reasonable-looking inference from a docstring exactly like the one this section used to have — and each one silently never ran on a real scrape as a result, discovered only much later via a live audit. `run_scrape_background()` and its dead support code have since been deleted. If you're about to add a new "do X automatically after every scrape" step, it belongs in `scripts/run_scrape.py`, the file described above — verify by checking `app/routers/scrape.py`'s launch call still points there.

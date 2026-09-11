@@ -1,24 +1,25 @@
 """
-Scrape orchestration service.
+Scrape orchestration service -- shared helpers used by scripts/run_scrape.py,
+the ACTUAL scrape pipeline (launched via subprocess.Popen from
+app/routers/scrape.py). Everything below is a plain function library, not an
+orchestrator: taxonomy sync, CSV-to-DB ingestion, and the freshness status
+card's data.
 
-run_scrape_background() is called from a daemon thread (not FastAPI BackgroundTasks).
-It:
-  1. Creates a ScrapeRun in the DB
-  2. Captures stdout from existing scraper utilities via ProgressCapture
-  3. Calls collect_listing_urls_for_routes_parallel_streaming
-  4. Calls download_and_parse_listing_batch_streaming
-  5. Ingests the resulting CSV into the DB via _ingest_csv_to_db
+Historical note (2026-09-11): this file used to also define
+run_scrape_background(), a daemon-thread orchestrator with its own
+per-step pipeline (taxonomy -> routes -> download -> ingest -> analytics ->
+embeddings -> AVM retrain). It was never called from anywhere -- real
+scrapes have always run through scripts/run_scrape.py's own, separately
+maintained copy of that pipeline instead. That gap silently ate two real
+features that were only ever added here: automatic embeddings refresh
+(caught 2026-08-28, fixed by copying the step into run_scrape.py) and
+automatic AVM retraining (caught 2026-09-11, same fix). Removed for good
+this time, rather than leaving a second well-intentioned future step to
+land in the one place that never runs -- see run_scrape.py for the real
+pipeline.
 """
 
-import contextlib
-import io
-import json
-import os
-import re
-import sys
-import traceback
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -26,61 +27,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 import csv as _csv_mod
 from pathlib import Path as _Path
 
-from app.config import settings
 from app.db.models import Listing, ListingSnapshot, ScrapeRun, TaxonomyPropertyType, TaxonomyGeoPath
 from app.db.session import db_session
-from app.progress.store import ProgressRun, progress_store
 from utils.feature_engineering import engineer_features, PROPERTY_TYPE_DISPLAY
-
-_ROUTE_RE = re.compile(r"\[(\d+)/(\d+)\]\s+routes?\s+completed", re.IGNORECASE)
-_LISTING_RE = re.compile(r"\[(\d+)/(\d+)\]\s+listings?\s+processed", re.IGNORECASE)
-
-
-class ProgressCapture(io.StringIO):
-    """
-    Intercepts scraper print() output and forwards parsed progress events to SSE.
-    Mirrors the real stdout so the console still receives output.
-    """
-
-    def __init__(self, run: ProgressRun, real_stdout: io.TextIOBase) -> None:
-        super().__init__()
-        self._run = run
-        self._real = real_stdout
-        self._buf = ""
-
-    def write(self, s: str) -> int:
-        self._real.write(s)
-        self._buf += s
-        while "\n" in self._buf:
-            line, self._buf = self._buf.split("\n", 1)
-            self._handle_line(line)
-        return len(s)
-
-    def flush(self) -> None:
-        self._real.flush()
-
-    def _handle_line(self, line: str) -> None:
-        line = line.strip()
-        if not line:
-            return
-
-        self._run.last_message = line
-
-        m = _ROUTE_RE.search(line)
-        if m:
-            self._run.routes_done = int(m.group(1))
-            self._run.routes_total = int(m.group(2))
-            self._run.push("progress", self._run.to_dict())
-            return
-
-        m = _LISTING_RE.search(line)
-        if m:
-            self._run.listings_done = int(m.group(1))
-            self._run.listings_total = int(m.group(2))
-            self._run.push("progress", self._run.to_dict())
-            return
-
-        self._run.push("log", {"message": line})
 
 
 def _safe(value: Any, cast=None):
@@ -251,7 +200,6 @@ def _ingest_rows_to_db(
     rows: list[dict],
     run_id,
     cumulative_offset: int = 0,
-    progress_run: ProgressRun | None = None,
     progress_callback=None,
 ) -> int:
     """
@@ -332,8 +280,6 @@ def _ingest_rows_to_db(
                 pass  # savepoint rolled back; session continues
 
     total_so_far = cumulative_offset + upserted
-    if progress_run:
-        progress_run.listings_upserted = total_so_far
     if progress_callback:
         progress_callback(total_so_far)
 
@@ -343,7 +289,6 @@ def _ingest_rows_to_db(
 def _ingest_csv_to_db(
     csv_path: str,
     run_id,
-    progress_run: ProgressRun | None = None,
     progress_callback=None,
 ) -> int:
     """Read a parsed_listings.csv and ingest via _ingest_rows_to_db in chunks."""
@@ -361,7 +306,6 @@ def _ingest_csv_to_db(
                 upserted_total += _ingest_rows_to_db(
                     chunk, run_id,
                     cumulative_offset=upserted_total,
-                    progress_run=progress_run,
                     progress_callback=progress_callback,
                 )
                 chunk = []
@@ -370,199 +314,10 @@ def _ingest_csv_to_db(
         upserted_total += _ingest_rows_to_db(
             chunk, run_id,
             cumulative_offset=upserted_total,
-            progress_run=progress_run,
             progress_callback=progress_callback,
         )
 
     return upserted_total
-
-
-def run_scrape_background(
-    run_id: str,
-    deal_types: list[str],
-    geo_paths: list[str],
-    property_types: list[str],
-) -> None:
-    """
-    Main background function — runs in daemon thread.
-    All stdout from the existing scraper utils is captured via ProgressCapture.
-    """
-    progress_run = progress_store.get(run_id)
-    if progress_run is None:
-        return
-
-    import uuid
-
-    # Ensure run_id is a UUID object for the DB
-    try:
-        db_run_id = uuid.UUID(run_id)
-    except ValueError:
-        db_run_id = uuid.uuid4()
-
-    try:
-        # 1. Create scrape_run row in DB
-        with db_session() as session:
-            db_run = ScrapeRun(
-                id=db_run_id,
-                status="running",
-                deal_types=deal_types,
-                geo_paths=geo_paths,
-                property_types=property_types,
-            )
-            session.add(db_run)
-
-        # 2. Build output directory
-        run_dir = Path(settings.scrape_runs_dir) / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        capture = ProgressCapture(progress_run, sys.stdout)
-
-        with contextlib.redirect_stdout(capture):
-            # 3. Refresh taxonomy from imot.bg sitemap (Notebook 01 logic)
-            from utils.fetch_data.fetch_data_utils import (
-                ScrapeSelection,
-                collect_listing_urls_for_routes_parallel_streaming,
-                download_and_parse_listing_batch_streaming,
-                load_valid_deal_types,
-                load_valid_geo_paths,
-                load_valid_property_types,
-                refresh_taxonomy,
-            )
-            import csv as _csv
-
-            refresh_taxonomy(settings.taxonomy_dir)
-
-            # 4. Load refreshed taxonomy and sync to DB
-            tax = settings.taxonomy_dir
-            valid_deal_types = load_valid_deal_types(f"{tax}/valid_deal_types.csv")
-            valid_geo_paths = load_valid_geo_paths(f"{tax}/valid_geo_paths.csv")
-            valid_property_types = load_valid_property_types(f"{tax}/valid_property_types.csv")
-
-            sync_taxonomy_to_db(settings.taxonomy_dir)
-
-            selection = ScrapeSelection(
-                deal_types=deal_types,
-                geo_paths=geo_paths,
-                property_types=property_types or [],
-            )
-
-            route_urls = selection.build_urls(
-                valid_deal_types=valid_deal_types,
-                valid_geo_paths=valid_geo_paths,
-                valid_property_types=valid_property_types,
-            )
-            progress_run.routes_total = len(route_urls)
-            progress_run.push("progress", progress_run.to_dict())
-
-            # 4. Collect listing URLs from all route pages
-            route_result = collect_listing_urls_for_routes_parallel_streaming(
-                route_urls=route_urls,
-                checkpoint_dir=str(run_dir),
-                max_workers=settings.scrape_max_workers_routes,
-                delay_seconds=settings.scrape_delay_seconds,
-            )
-
-            # Read deduplicated listing URLs from the checkpoint CSV
-            listing_urls_path = route_result["listing_urls_path"]
-            seen_urls: set[str] = set()
-            listing_urls: list[str] = []
-            if Path(listing_urls_path).exists():
-                with open(listing_urls_path, encoding="utf-8", errors="replace") as f:
-                    for row in _csv.DictReader(f):
-                        url = row.get("listing_url", "").strip()
-                        if url and url not in seen_urls:
-                            seen_urls.add(url)
-                            listing_urls.append(url)
-
-            progress_run.listings_total = len(listing_urls)
-            progress_run.push("progress", progress_run.to_dict())
-
-            # 5. Download and parse listings
-            download_and_parse_listing_batch_streaming(
-                listing_urls=listing_urls,
-                output_dir=str(run_dir),
-                max_workers=settings.scrape_max_workers_listings,
-            )
-
-        # 6. Ingest CSV to DB
-        csv_path = run_dir / "parsed_listings.csv"
-        if csv_path.exists():
-            progress_run.push("log", {"message": f"Ingesting {csv_path.name} to DB…"})
-            upserted = _ingest_csv_to_db(str(csv_path), db_run_id, progress_run)
-        else:
-            upserted = 0
-            progress_run.push("log", {"message": "Warning: parsed_listings.csv not found"})
-
-        # 7. Mark run complete in DB
-        with db_session() as session:
-            run_row = session.get(ScrapeRun, db_run_id)
-            if run_row:
-                run_row.status = "completed"
-                run_row.finished_at = datetime.now(timezone.utc)
-                run_row.routes_done = progress_run.routes_done
-                run_row.routes_total = progress_run.routes_total
-                run_row.listings_found = progress_run.listings_total
-                run_row.listings_upserted = upserted
-
-        # 8. Analytics: detect price events + refresh materialized view
-        try:
-            from app.services.analytics_service import compute_price_events, refresh_mv
-            progress_run.push("log", {"message": "Изчисляване на ценови промени…"})
-            n_events = compute_price_events(db_run_id)
-            progress_run.push("log", {"message": f"Ценови събития: {n_events}. Обновяване на аналитичен изглед…"})
-            refresh_mv()
-            progress_run.push("log", {"message": "Аналитичният изглед е обновен."})
-        except Exception as _ae:
-            progress_run.push("log", {"message": f"Предупреждение: аналитиката не се обнови ({_ae})"})
-
-        # 9. Embeddings: re-embed listings touched by this run (new or changed
-        # since last embedded). Scoped to db_run_id, not the whole corpus --
-        # see app/services/llm/embed_backfill.py. Non-fatal: missing
-        # OPENAI_API_KEY or a transient API error should not fail the scrape.
-        try:
-            from app.services.llm.embed_backfill import backfill_embeddings
-
-            progress_run.push("log", {"message": "Обновяване на семантични вектори (embeddings) за нови/променени обяви…"})
-            with db_session() as session:
-                n_embedded = backfill_embeddings(session, run_id=db_run_id)
-            progress_run.push("log", {"message": f"Embeddings: {n_embedded} обяви ембед-нати/обновени."})
-        except Exception as _ee:
-            progress_run.push("log", {"message": f"Предупреждение: embeddings не се обновиха ({_ee})"})
-
-        # 10. AVM: retrain segments whose training_eligible row count grew
-        # enough since their active model was trained (Phase 14 Tier 2.1).
-        # No-op on any machine without R2_MAINTAINER_* -- see
-        # avm_retrain_service's own docstring for why that's the right gate.
-        # Non-fatal like steps 8/9: a failed retrain never fails the scrape.
-        try:
-            from app.services.avm_retrain_service import maybe_retrain_avm_models
-
-            with db_session() as session:
-                retrain_results = maybe_retrain_avm_models(
-                    session, on_progress=lambda msg: progress_run.push("log", {"message": msg})
-                )
-            retrained = [r["segment"] for r in retrain_results if r["action"] == "retrained"]
-            if retrained:
-                progress_run.push("log", {"message": f"AVM пре-трениране: {', '.join(retrained)}."})
-        except Exception as _re:
-            progress_run.push("log", {"message": f"Предупреждение: AVM пре-трениране не се изпълни ({_re})"})
-
-        progress_run.status = "completed"
-        progress_run.finished_at = datetime.utcnow()
-        progress_run.push("done", progress_run.to_dict())
-
-    except Exception as exc:
-        tb = traceback.format_exc()
-        progress_run.status = "failed"
-        progress_run.error = str(exc)
-        progress_run.push("error", {"message": str(exc), "traceback": tb})
-
-        with db_session() as session:
-            run_row = session.get(ScrapeRun, db_run_id)
-            if run_row:
-                run_row.status = "failed"
-                run_row.finished_at = datetime.now(timezone.utc)
-                run_row.error_message = str(exc)[:2000]
 
 
 def get_scrape_status(db) -> dict:
