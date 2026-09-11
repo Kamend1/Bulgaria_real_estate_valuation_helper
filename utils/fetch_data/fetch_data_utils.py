@@ -1108,6 +1108,17 @@ def append_one_row_csv(path: Path, row: dict) -> None:
 def load_completed_listing_urls(manifest_path: Path) -> set[str]:
     """
     Reads already downloaded listing URLs so the process can resume.
+
+    Only counts a URL as "completed" if it actually has HTML saved to disk
+    (html_path populated -- see download_one_listing/download_and_parse_
+    one_listing, which only write html_path when status_code == 200). A
+    URL that was ATTEMPTED but failed (network blip, timeout, transient
+    5xx) previously earned a manifest row anyway and was then skipped
+    forever on any resume -- real incident 2026-09-10: a ~6-minute DNS
+    outage on the scraping machine coincided exactly with the download of
+    the entire rent segment, and every one of those 37,193 failed URLs was
+    marked "done" here despite never having been downloaded, permanently
+    losing that data for the run instead of being retried.
     """
     if not manifest_path.exists():
         return set()
@@ -1119,7 +1130,7 @@ def load_completed_listing_urls(manifest_path: Path) -> set[str]:
 
         for row in reader:
             listing_url = row.get("listing_url")
-            if listing_url:
+            if listing_url and row.get("html_path"):
                 completed.add(listing_url)
 
     return completed
