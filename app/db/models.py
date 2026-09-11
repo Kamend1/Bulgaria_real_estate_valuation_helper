@@ -177,6 +177,10 @@ class ListingSnapshot(Base):
     listing = relationship("Listing", back_populates="snapshots")
     scrape_run = relationship("ScrapeRun", back_populates="snapshots")
 
+    __table_args__ = (
+        UniqueConstraint("listing_id", "scrape_run_id", name="uq_listing_snapshots_listing_run"),
+    )
+
 
 class AppraisalReport(Base):
     __tablename__ = "appraisal_reports"

@@ -242,6 +242,13 @@ def _ingest_rows_to_db(
                                 "total_floors_model": listing_vals["total_floors_model"],
                                 "features_count": listing_vals["features_count"],
                                 "training_eligible": listing_vals["training_eligible"],
+                                # Being re-ingested in a real scrape is definitional proof the
+                                # listing is live -- revive it even if a prior run (wrongly, e.g.
+                                # due to a transient outage) archived it. See 2026-09-11 incident:
+                                # without this, listings archived-then-recovered stayed stuck.
+                                "status": "active",
+                                "archived_at": None,
+                                "archived_by_run_id": None,
                             },
                         )
                         .returning(Listing.id, Listing.published_date)
@@ -262,18 +269,31 @@ def _ingest_rows_to_db(
                         for k, v in row.items()
                         if k not in ("description_clean",)
                     }
-                    session.add(ListingSnapshot(
-                        listing_id=listing_id,
-                        scrape_run_id=run_id,
-                        total_price=listing_vals["total_price"],
-                        currency=listing_vals["currency"],
-                        price_per_sqm_model=listing_vals["price_per_sqm_model"],
-                        area_sqm_model=listing_vals["area_sqm_model"],
-                        vat_status=listing_vals["vat_status"],
-                        views=listing_vals["views"],
-                        days_on_market=dom,
-                        parsed_data=parsed_data_json,
-                    ))
+                    # on_conflict_do_nothing (not do_update): re-ingesting the same
+                    # (listing, run) pair -- e.g. a recovery script re-processing an
+                    # already-ingested CSV -- must be a true no-op here. See the
+                    # 2026-09-11 incident: a bare session.add() with no idempotency
+                    # guard created 129,197 duplicate snapshot rows for one run,
+                    # inflating every mv_analytics_flat-derived count.
+                    snap_stmt = (
+                        pg_insert(ListingSnapshot)
+                        .values(
+                            listing_id=listing_id,
+                            scrape_run_id=run_id,
+                            total_price=listing_vals["total_price"],
+                            currency=listing_vals["currency"],
+                            price_per_sqm_model=listing_vals["price_per_sqm_model"],
+                            area_sqm_model=listing_vals["area_sqm_model"],
+                            vat_status=listing_vals["vat_status"],
+                            views=listing_vals["views"],
+                            days_on_market=dom,
+                            parsed_data=parsed_data_json,
+                        )
+                        .on_conflict_do_nothing(
+                            index_elements=["listing_id", "scrape_run_id"],
+                        )
+                    )
+                    session.execute(snap_stmt)
                     upserted += 1
 
             except Exception:
