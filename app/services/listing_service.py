@@ -220,6 +220,7 @@ def get_cities_for_filter(db: Session) -> list[tuple[str, int]]:
         FROM listings
         WHERE title_city_model IS NOT NULL
           AND (geo_category IS NULL OR geo_category != 'foreign')
+          AND status = 'active'
         GROUP BY title_city_model
         ORDER BY n DESC
     """)).fetchall()
@@ -237,6 +238,7 @@ def get_quarters_for_filter(db: Session, cities: list[str]) -> list[str]:
             WHERE location_level_2_model IS NOT NULL
               AND location_level_2_model != ''
               AND title_city_model = ANY(:cities)
+              AND status = 'active'
             ORDER BY 1
         """),
         {"cities": cities},
@@ -249,7 +251,7 @@ def get_property_types_for_filter(db: Session) -> list[tuple[str, str, int]]:
     rows = db.execute(text("""
         SELECT t.slug, t.display_name_bg, count(l.id) AS n
         FROM taxonomy_property_types t
-        LEFT JOIN listings l ON l.property_type_slug = t.slug
+        LEFT JOIN listings l ON l.property_type_slug = t.slug AND l.status = 'active'
         GROUP BY t.slug, t.display_name_bg
         ORDER BY n DESC, t.display_name_bg
     """)).fetchall()

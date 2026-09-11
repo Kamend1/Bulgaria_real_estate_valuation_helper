@@ -10,10 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://appraiser:appraiser@localhost:5432/appraisal"
 
     taxonomy_dir: str = "data/taxonomy"
-    raw_html_dir: str = "data/raw_listing_html"
     scrape_runs_dir: str = "data/scrape_runs"
-    reports_output_dir: str = "outputs/reports"
-    report_template_path: str = "templates/reports/appraisal_template.docx"
     avm_models_dir: str = "models/avm"
     log_dir: str = "logs"
     # Uploaded report documents (Tier 3, 2026-08-26) -- local disk, not R2:
@@ -47,9 +44,9 @@ class Settings(BaseSettings):
     session_https_only: bool = False
 
     # Cloudflare R2 (S3-compatible), split by credential tier — see README's
-    # "R2 достъп и ключове" section. Account/endpoint are account-wide;
-    # everything else is scoped to what actually needs it.
-    r2_account_id: str = ""
+    # "R2 достъп и ключове" section. r2_endpoint_url already embeds the
+    # account (full https://<account>.r2.cloudflarestorage.com URL) so
+    # there's no separate account-id setting.
     r2_endpoint_url: str = ""
 
     # Read-only — safe to ship in ANY deployed instance's .env (including a

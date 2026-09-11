@@ -162,7 +162,7 @@ async def rename_conversation_route(
     conv = rename_conversation(db, conversation_id, user.id, title)
     if not conv:
         raise HTTPException(status_code=404)
-    return RedirectResponse(url="/analyst/", status_code=303)
+    return _analyst_redirect(conv.id)
 
 
 def _run_turn(

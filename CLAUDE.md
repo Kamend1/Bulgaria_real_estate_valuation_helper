@@ -148,9 +148,12 @@ app/
     base.py            # create_engine, SessionLocal, Base
     session.py         # get_db() FastAPI dep + db_session() context manager for threads
     models.py          # ORM models: ScrapeRun, Listing, ListingSnapshot,
-                       #   ListingPriceEvent, ComparablePool, ReportComparable,
-                       #   AppraisalReport, AvmModel, ListingEmbedding,
-                       #   AiValuationRun, User, UserConsent
+                       #   ComparablePool, ReportComparable, AppraisalReport,
+                       #   AvmModel, ListingEmbedding, AiValuationRun, User,
+                       #   UserConsent. listing_price_events is a real table
+                       #   (alembic/versions/0007_analytics.py) but has no
+                       #   ORM model -- analytics_service.py accesses it via
+                       #   raw SQL only.
   routers/
     auth.py, admin.py, scrape.py, listings.py, analytics.py,
     comparables.py     # subject form, AVM/GIS panels, comparable pool, AI
@@ -186,10 +189,14 @@ scripts/
                           #   see "Scrape pipeline and progress" below
   import_historical_data.py, train_avm_model.py, embed_listings.py,
   backup_to_r2.py, prune_old_models.py, lookup_parcel.py, create_admin.py,
+  chunk_legal_documents.py,  # one-off backfill: embed existing legal_standard
+                             #   market_documents into legal_document_chunks
   recover_scrape_run.py   # one-off: retry a scrape run's failed downloads + re-ingest
 alembic/
-  versions/            # 0001 initial schema ... 0021 (latest) perf indexes;
-                       #   0019 adds pgvector + listing_embeddings/ai_valuation_runs
+  versions/            # see the directory for the current head -- 0019 adds
+                       #   pgvector + listing_embeddings/ai_valuation_runs;
+                       #   this list is intentionally not kept in lockstep
+                       #   with every new migration, don't infer "latest" from it
 static/app.css
 ```
 

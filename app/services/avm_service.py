@@ -127,7 +127,8 @@ def _cohort_median_ppsqm(db: Session, property_type_slug: str, geo_category: str
     value = db.execute(text("""
         SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY price_per_sqm_model)
         FROM listings
-        WHERE training_eligible = TRUE
+        WHERE status = 'active'
+          AND training_eligible = TRUE
           AND deal_type_normalized = 'sale'
           AND property_type_slug = :slug
           AND geo_category = :geo
