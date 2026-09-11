@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AgentLlmCall, AiValuationRun, AppraisalReport
 from app.services.comparable_service import get_pool_with_stats
-from app.services.llm.providers import estimate_cost_usd, get_chat_model, resolve_chat_model
+from app.services.llm.providers import estimate_cost_usd, get_chat_model, is_length_truncated, resolve_chat_model
 from app.services.llm.retriever import retrieve_comparables
 from app.services.llm.tools import build_tools
 
@@ -55,11 +55,24 @@ MIN_COMPARABLES = 3
 # of this), not a hard cost ceiling on their own -- cost is still bounded by
 # the cheap-tier model default + rate limiting on the route, not by
 # squeezing max_tokens.
-MAX_OUTPUT_TOKENS = 6500
+# Bumped again 2026-09-11: a real claude-opus-5 run hit the previous 9000
+# cap for an income-inclusive generation EXACTLY (agent_llm_calls logged
+# output_tokens=9000 on the final narrative call), cutting off mid-sentence
+# partway through the income REASONING section and never writing the income
+# CAVEATS section at all. Not a hidden-reasoning-token issue like the
+# gpt-5.4-pro incident above (extended thinking isn't enabled here) --
+# Opus's prose for this prompt shape is simply longer per section than the
+# cheaper-tier models tested when these caps were first set. See also
+# is_length_truncated() below, wired in the same commit as this bump: raising
+# the cap reduces how often this happens, but can never guarantee it won't
+# for a sufficiently verbose model/prompt, so truncation is now also
+# detected and surfaced to the appraiser rather than silently shown as if
+# the narrative were complete.
+MAX_OUTPUT_TOKENS = 8000
 # Roughly proportional to MAX_OUTPUT_TOKENS above -- generating both sales
 # and income sections (8 headed blocks instead of 4) needs more room even
 # before accounting for a reasoning model's hidden token spend on top.
-MAX_OUTPUT_TOKENS_WITH_INCOME = 9000
+MAX_OUTPUT_TOKENS_WITH_INCOME = 12000
 MAX_TOOL_ITERATIONS = 5  # mandatory get_pool_stats + optional get_market_trend_stats + optional compute_income_valuation + final answer, with headroom
 
 _SYSTEM_PROMPT_BASE = """Ти подпомагаш лицензиран оценител на недвижими имоти в България, като
@@ -418,6 +431,11 @@ def generate_valuation_backbone(
     total_output_tokens = 0
     final_response: AIMessage | None = None
     income_valuation_result: dict | None = None
+    # True if the final narrative-generating call was cut short by the
+    # model's output-token ceiling rather than reaching a natural stop --
+    # see is_length_truncated() and the MAX_OUTPUT_TOKENS comment above for
+    # the real incident (claude-opus-5, 2026-09-11) this closes.
+    truncated = False
 
     # Per-call breakdown (Tier 1, 2026-08-26): total_input_tokens/
     # total_output_tokens above are the SUM ai_valuation_runs logs -- this
@@ -463,6 +481,7 @@ def generate_valuation_backbone(
             messages.append(response)
             if not response.tool_calls:
                 final_response = response
+                truncated = is_length_truncated(response)
                 break
 
             for call in response.tool_calls:
@@ -485,17 +504,23 @@ def generate_valuation_backbone(
             progress.step = "Генериране на текст…"
             emit()
             stream_messages = messages if not (messages and isinstance(messages[-1], AIMessage) and not messages[-1].tool_calls) else messages[:-1]
-            final_text = ""
+            chunk_accum = None
             last_chunk_usage = {}
             for chunk in model.stream(stream_messages):
-                final_text += _extract_text(chunk.content)
+                chunk_accum = chunk if chunk_accum is None else chunk_accum + chunk
                 if chunk.usage_metadata:
                     last_chunk_usage = chunk.usage_metadata
+                live_text = _extract_text(chunk_accum.content)
                 # Live estimate: ~4 chars/token is a rough but immediate signal;
                 # replaced by the authoritative usage_metadata total once the
                 # stream's final chunk (which carries it, for OpenAI) arrives.
-                progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(final_text) // 4, 1)
+                progress.tokens_so_far = total_input_tokens + total_output_tokens + max(len(live_text) // 4, 1)
                 emit()
+            final_text = _extract_text(chunk_accum.content) if chunk_accum is not None else ""
+            # This fallback call fully replaces the tool-loop's attempt (the
+            # model regenerates from scratch), so its own truncation status
+            # supersedes whatever was set above rather than OR-ing with it.
+            truncated = is_length_truncated(chunk_accum) if chunk_accum is not None else False
             if last_chunk_usage:
                 call_in = last_chunk_usage.get("input_tokens", 0)
                 call_out = last_chunk_usage.get("output_tokens", 0)
@@ -582,6 +607,7 @@ def generate_valuation_backbone(
         "suggested_value_range_high": value_high,
         "comparables": comps,
         "income": income_result,
+        "truncated": truncated,
     })
 
     cost = estimate_cost_usd(model_id, total_input_tokens, total_output_tokens, provider=provider)
