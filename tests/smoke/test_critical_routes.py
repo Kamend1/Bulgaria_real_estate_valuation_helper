@@ -25,6 +25,40 @@ def test_home_page_renders(client):
     assert "csrf-token" in resp.text
 
 
+def test_home_page_stats_exclude_archived_listings(client):
+    """Regression test (2026-09-11): app/main.py's home() used to count
+    `FROM listings` with no status filter, so archived (sold/removed)
+    listings inflated the "Обяви за продажба"/"Обяви за наем" stat cards --
+    caught when a user noticed the homepage total exactly matched
+    active+archived, not the real active count. Uses a disposable archived
+    row against the real DB (home() opens its own session, bypassing the
+    test's dependency override) -- cleaned up in a finally block."""
+    from sqlalchemy import text as sa_text
+    from app.db.session import db_session
+
+    test_url = "https://test.invalid/regression-home-stats-archived-1"
+    with db_session() as db:
+        before_sale_count = db.execute(
+            sa_text("SELECT count(*) FROM listings WHERE status = 'active' AND deal_type_normalized = 'sale'")
+        ).scalar()
+
+    try:
+        with db_session() as db:
+            db.execute(sa_text("""
+                INSERT INTO listings (ad_url, deal_type_normalized, status, price_per_sqm_model)
+                VALUES (:url, 'sale', 'archived', 999999)
+            """), {"url": test_url})
+
+        html = client.get("/").text
+        m = re.search(r'stat-value">([\d\s]+)</div>\s*<div class="stat-label">Обяви за продажба', html)
+        assert m, "sale_count stat card not found on home page"
+        shown_sale_count = int(m.group(1).replace(" ", "").replace("\xa0", ""))
+        assert shown_sale_count == before_sale_count
+    finally:
+        with db_session() as db:
+            db.execute(sa_text("DELETE FROM listings WHERE ad_url = :url"), {"url": test_url})
+
+
 def test_login_page_renders(client):
     resp = client.get("/auth/login")
     assert resp.status_code == 200

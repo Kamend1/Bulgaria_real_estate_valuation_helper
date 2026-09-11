@@ -212,6 +212,7 @@ async def home(request: Request):
                 )::numeric, 2)                                           AS avg_rent_ppsqm,
                 max(last_seen_at)::date                                  AS last_seen
             FROM listings
+            WHERE status = 'active'
         """)).fetchone()
         if rows:
             stats = {
@@ -224,7 +225,7 @@ async def home(request: Request):
         geo = db.execute(text("""
             SELECT geo_category, count(*) AS n
             FROM listings
-            WHERE deal_type_normalized = 'sale' AND geo_category IS NOT NULL
+            WHERE deal_type_normalized = 'sale' AND geo_category IS NOT NULL AND status = 'active'
             GROUP BY 1 ORDER BY 2 DESC LIMIT 6
         """)).fetchall()
         stats["geo"] = [(r[0], int(r[1])) for r in geo]
