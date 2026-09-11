@@ -296,7 +296,7 @@ def run_assistant_turn(
     effective_max_tokens = MAX_OUTPUT_TOKENS if max_output_tokens is None else max(MIN_OUTPUT_TOKENS, min(MAX_OUTPUT_TOKENS_HARD_CAP, max_output_tokens))
     effective_max_iterations = MAX_TOOL_ITERATIONS if max_tool_iterations is None else max(1, min(MAX_TOOL_ITERATIONS_HARD_CAP, max_tool_iterations))
     sampling_kwargs = build_sampling_kwargs(
-        provider, temperature=temperature, top_p=top_p, top_k=top_k,
+        provider, model=model_id, temperature=temperature, top_p=top_p, top_k=top_k,
         frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, seed=seed,
     )
 

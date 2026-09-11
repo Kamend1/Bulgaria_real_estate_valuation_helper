@@ -195,7 +195,11 @@
   // caps at 1.0, others at 2.0).
   function applyCapabilities() {
     var provider = currentProvider();
-    var caps = CAPS[provider] || CAPS['openai'];
+    // A specific model (e.g. "openai:gpt-5.4-pro") can have narrower support
+    // than the rest of its provider -- see providers.py's
+    // get_sampling_capabilities()/_sampling_support -- so an exact
+    // "provider:model" entry wins over the plain provider-keyed default.
+    var caps = CAPS[sel.value] || CAPS[provider] || CAPS['openai'];
     if (!caps) return;
 
     var tempInput = els.temperature.input;

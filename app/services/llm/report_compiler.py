@@ -81,7 +81,7 @@ def run_compile(
             on_progress(step)
 
     documents_note = _documents_note(db, report.id)
-    sampling_kwargs = build_sampling_kwargs(resolved_provider)
+    sampling_kwargs = build_sampling_kwargs(resolved_provider, model=resolved_model)
     call_log: list[dict] = []
     results: dict[str, dict] = {}
 

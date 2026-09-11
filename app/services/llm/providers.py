@@ -252,12 +252,48 @@ _SAMPLING_SUPPORT = {
     "local":        {"top_k": False, "frequency_penalty": True,  "presence_penalty": True,  "seed": True},
 }
 
+# Real incident (2026-09-11): a user picked gpt-5.4-pro in the chat model
+# picker with presence_penalty set and got a raw
+# "Responses.create() got an unexpected keyword argument 'presence_penalty'"
+# -- _SAMPLING_SUPPORT above is per-PROVIDER, but langchain-openai's
+# ChatOpenAI silently routes certain model ids through OpenAI's Responses
+# API instead of Chat Completions (its own _model_prefers_responses_api()/
+# _RESPONSES_API_ONLY_PREFIXES, mirrored here rather than imported since
+# it's a private name that could change without notice -- verified directly
+# against langchain-openai==1.6.0/openai==3.3.1, the versions installed
+# here). The Responses API's create() has NO frequency_penalty/
+# presence_penalty/seed parameters at all (confirmed via
+# inspect.signature(openai.resources.responses.Responses.create)) -- passing
+# any of them raises a raw TypeError from the openai SDK itself, not a clean
+# LangChain-level error. temperature/top_p ARE supported by both APIs, so
+# those stay enabled for these models.
+_RESPONSES_API_ONLY_OPENAI_PREFIXES = ("gpt-5-pro", "gpt-5.2-pro", "gpt-5.4-pro", "gpt-5.5-pro")
+
+
+def _sampling_support(provider: str, model: str | None) -> dict:
+    """Like _SAMPLING_SUPPORT[provider], but narrowed for the specific
+    model when its actual API surface differs from the rest of its
+    provider's models (see _RESPONSES_API_ONLY_OPENAI_PREFIXES above)."""
+    support = dict(_SAMPLING_SUPPORT.get(provider, _SAMPLING_SUPPORT["openai"]))
+    if provider == "openai" and model and model.startswith(_RESPONSES_API_ONLY_OPENAI_PREFIXES):
+        support["frequency_penalty"] = False
+        support["presence_penalty"] = False
+        support["seed"] = False
+    return support
+
 
 def get_sampling_capabilities() -> dict:
     """Per-provider ranges/support for the chat console's model-parameter
     panel -- single source of truth shared by the template (which controls
     to grey out per provider) and build_sampling_kwargs (which values to
-    actually forward to the provider)."""
+    actually forward to the provider).
+
+    Also includes a "provider:model" entry (matching the chat UI's combined
+    provider_model select value) for every model whose actual support
+    differs from its provider's general default -- the template's JS looks
+    this up first, falling back to the plain provider-keyed entry, so a
+    model like gpt-5.4-pro can grey out frequency/presence penalty and seed
+    without every other OpenAI model losing them too."""
     caps = {}
     for provider, (temp_min, temp_max) in _TEMPERATURE_RANGE.items():
         support = _SAMPLING_SUPPORT[provider]
@@ -269,11 +305,27 @@ def get_sampling_capabilities() -> dict:
             "presence_penalty": {"supported": support["presence_penalty"], "min": -2.0, "max": 2.0},
             "seed": {"supported": support["seed"]},
         }
+
+    for provider, models in _MODEL_TIERS.items():
+        temp_min, temp_max = _TEMPERATURE_RANGE.get(provider, (0.0, 2.0))
+        for model_id, _tier_label in models:
+            support = _sampling_support(provider, model_id)
+            if support == _SAMPLING_SUPPORT.get(provider):
+                continue  # no override needed, the provider-level entry already matches
+            caps[f"{provider}:{model_id}"] = {
+                "temperature": {"min": temp_min, "max": temp_max},
+                "top_p": {"min": 0.0, "max": 1.0},
+                "top_k": {"supported": support["top_k"], "min": 1, "max": 500},
+                "frequency_penalty": {"supported": support["frequency_penalty"], "min": -2.0, "max": 2.0},
+                "presence_penalty": {"supported": support["presence_penalty"], "min": -2.0, "max": 2.0},
+                "seed": {"supported": support["seed"]},
+            }
     return caps
 
 
 def build_sampling_kwargs(
     provider: str | None,
+    model: str | None = None,
     temperature: float | None = None,
     top_p: float | None = None,
     top_k: int | None = None,
@@ -282,9 +334,10 @@ def build_sampling_kwargs(
     seed: int | None = None,
 ) -> dict:
     """Filters + clamps user-supplied sampling params to what the resolved
-    provider's class actually accepts (see _SAMPLING_SUPPORT), clamping
-    in-range values instead of forwarding out-of-range ones. The UI already
-    greys out unsupported controls per provider, but this is the actual
+    provider's class -- and, for models that need it, the specific model --
+    actually accepts (see _sampling_support), clamping in-range values
+    instead of forwarding out-of-range ones. The UI already greys out
+    unsupported controls per provider/model, but this is the actual
     enforcement point -- a stale form value from switching provider/model
     mid-edit must not reach the provider constructor and raise.
 
@@ -299,7 +352,7 @@ def build_sampling_kwargs(
     understood knob and the UI's own top_p hint already tells the user to
     change one or the other, not both."""
     provider = provider or "openai"
-    support = _SAMPLING_SUPPORT.get(provider, _SAMPLING_SUPPORT["openai"])
+    support = _sampling_support(provider, model)
     temp_min, temp_max = _TEMPERATURE_RANGE.get(provider, (0.0, 2.0))
     kwargs: dict = {}
     if temperature is not None:
