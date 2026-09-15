@@ -43,6 +43,47 @@ def test_get_chat_model_local_constructs_chatopenai_with_base_url(monkeypatch):
     assert model.max_tokens == 500
 
 
+@pytest.fixture(autouse=True)
+def _fake_openai_key(monkeypatch):
+    """No real network call happens at ChatOpenAI construction time --
+    safe to assert on the constructed client's own config with a dummy key."""
+    monkeypatch.setattr(providers.settings, "openai_api_key", "sk-test-not-real")
+
+
+class TestGpt56ReasoningEffortDefault:
+    """Regression test for a real incident (2026-09-15): every real chat/
+    analyst/valuation call in this app eventually binds tools downstream of
+    get_chat_model(), and gpt-5.6-luna/terra/sol reject ANY tool-bound Chat
+    Completions request outright unless reasoning_effort is explicitly
+    "none" -- confirmed live: "Function tools with reasoning_effort are not
+    supported for gpt-5.6-luna in /v1/chat/completions. ... or set
+    reasoning_effort to 'none'." Fixed by having get_chat_model() default
+    reasoning_effort="none" for this model family, unless the caller
+    already specified reasoning_effort/reasoning explicitly."""
+
+    def test_gpt56_models_default_to_reasoning_effort_none(self):
+        for model_id in ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"):
+            model = providers.get_chat_model(provider="openai", model=model_id, max_tokens=50)
+            assert model.reasoning_effort == "none", model_id
+
+    def test_unrelated_openai_model_does_not_get_reasoning_effort_forced(self):
+        model = providers.get_chat_model(provider="openai", model="gpt-4o-mini", max_tokens=50)
+        assert model.reasoning_effort is None
+
+    def test_explicit_reasoning_effort_is_not_overridden(self):
+        model = providers.get_chat_model(
+            provider="openai", model="gpt-5.6-luna", max_tokens=50, reasoning_effort="medium",
+        )
+        assert model.reasoning_effort == "medium"
+
+    def test_explicit_reasoning_param_is_not_overridden(self):
+        model = providers.get_chat_model(
+            provider="openai", model="gpt-5.6-sol", max_tokens=50, reasoning={"effort": "low"},
+        )
+        assert model.reasoning_effort is None  # untouched -- reasoning= was already provided
+        assert model.reasoning == {"effort": "low"}
+
+
 def test_estimate_cost_usd_local_is_always_zero():
     assert providers.estimate_cost_usd("whatever-model", 10_000, 10_000, provider="local") == 0.0
     assert providers.estimate_cost_usd("qwen2.5", 0, 0, provider="local") == 0.0

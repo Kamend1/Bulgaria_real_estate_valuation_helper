@@ -330,6 +330,12 @@ _OPENAI_MODEL_OVERRIDES: list[tuple[tuple[str, ...], dict]] = [
      {"top_p": False, "frequency_penalty": False, "presence_penalty": False}),
 ]
 
+# gpt-5.6-luna/terra/sol reject ANY tool-bound Chat Completions request
+# outright unless reasoning_effort is explicitly "none" -- see the real
+# incident + full reasoning documented at get_chat_model()'s openai branch,
+# where this constant is actually used.
+_REASONING_EFFORT_CONFLICTS_WITH_TOOLS_PREFIXES = ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol")
+
 
 def _sampling_support(provider: str, model: str | None) -> dict:
     """Like _SAMPLING_SUPPORT[provider] plus an implicit top_p=True, but
@@ -460,6 +466,30 @@ def get_chat_model(
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not set -- add it to .env")
         from langchain_openai import ChatOpenAI
+        if (
+            model
+            and model.startswith(_REASONING_EFFORT_CONFLICTS_WITH_TOOLS_PREFIXES)
+            and "reasoning_effort" not in kwargs
+            and "reasoning" not in kwargs
+        ):
+            # Real incident (2026-09-15): every real chat/analyst/valuation
+            # call in this app binds tools (bind_tools() happens downstream,
+            # after this factory returns), and gpt-5.6-luna/terra/sol reject
+            # ANY tool-bound Chat Completions request outright unless
+            # reasoning_effort is explicitly "none" -- confirmed live:
+            # "Function tools with reasoning_effort are not supported for
+            # gpt-5.6-luna in /v1/chat/completions. ... or set
+            # reasoning_effort to 'none'." (the implicit server-side default
+            # reasoning_effort conflicts with tool use even though this
+            # factory never sets one). The other documented option (switch
+            # to the Responses API) was tested and rejected: it also loses
+            # `seed` support entirely (verified live) on top of already
+            # losing top_p/frequency_penalty/presence_penalty for this
+            # family -- strictly worse than staying on Chat Completions with
+            # reasoning disabled. Since tools are effectively mandatory here,
+            # this default costs nothing in practice; pass reasoning_effort/
+            # reasoning explicitly to override for a genuinely tool-free call.
+            kwargs["reasoning_effort"] = "none"
         return ChatOpenAI(model=model, api_key=settings.openai_api_key, **kwargs)
 
     if provider == "anthropic":
