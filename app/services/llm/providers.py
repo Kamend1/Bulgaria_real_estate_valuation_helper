@@ -22,7 +22,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from app.config import settings
 
 _DEFAULT_MODELS = {
-    "openai": "gpt-5.4-mini",
+    # Upgraded 2026-09-15: OpenAI's gpt-5.4-*/-pro trio was superseded by the
+    # gpt-5.6 Luna/Terra/Sol family (a durable capability-tier naming scheme
+    # per OpenAI, independent of the generation number) -- confirmed live
+    # against this account's actual API access (client.models.list() +
+    # a real ChatOpenAI.invoke() per model), not assumed from the name.
+    "openai": "gpt-5.6-luna",
     # Haiku 4.5 chosen deliberately over Anthropic's own stated default
     # (Opus 5) to match the cost tier of the other providers' defaults here
     # -- this whole phase is cost-sensitive by design (see plan doc); the
@@ -34,17 +39,36 @@ _DEFAULT_MODELS = {
 
 # 3 tiers per provider (cheap/mid/premium) -- cheap always matches
 # _DEFAULT_MODELS[provider] above. Lets the UI offer a model choice per
-# provider, not just a provider choice. gemini's premium slot deliberately
-# uses the "-latest" alias, not a pinned id: the only fully-stable
-# (non-preview) Gemini Pro-tier model at the time this was written
-# (gemini-2.5-pro) is scheduled for retirement 2026-10-16, and there is no
-# non-preview 3.x Pro model yet -- pinning a soon-to-retire id here would be
-# worse than tracking Google's own forward-compatible pointer.
+# provider, not just a provider choice.
+#
+# openai (2026-09-15): Luna/Terra/Sol replace gpt-5.4-mini/gpt-5.4/gpt-5.4-pro
+# -- verified live via client.models.list() against this account, then a
+# real ChatOpenAI.invoke() per model to confirm each actually works (not
+# just listed). Tier order (cheap/mid/premium = Luna/Terra/Sol) and pricing
+# cross-checked against 2 independent trackers that agreed exactly
+# (eesel.ai, vellum.ai, both dated post the 2026-07-30 price cut) -- see
+# _PRICING_PER_1M_USD. Capability profile differs from both the old gpt-5.4
+# trio AND from gpt-5.4-pro's Responses-API routing -- see
+# _RESPONSES_API_ONLY_OPENAI_PREFIXES/_sampling_support below, verified with
+# real invoke() calls per param (temperature works, top_p/frequency_penalty/
+# presence_penalty all return a 400 "Unsupported parameter", seed works).
+#
+# google_genai (2026-09-15): mid tier bumped gemini-3.5-flash -> gemini-3.8-
+# flash (confirmed non-preview via client.models.get(), unlike e.g.
+# gemini-3.1-pro-preview) -- real invoke() confirmed temperature/top_p/top_k
+# all still work. Cheap tier stays gemini-3.5-flash-lite: no non-preview
+# Flash-Lite newer than 3.5 exists yet (checked client.models.list()).
+# Premium slot deliberately uses the "-latest" alias, not a pinned id: the
+# only fully-stable (non-preview) Gemini Pro-tier model at the time this was
+# first written (gemini-2.5-pro) was scheduled for retirement 2026-10-16,
+# and there is still no non-preview 3.x Pro model (only gemini-3.1-pro-
+# preview) -- pinning a preview/soon-retiring id here would be worse than
+# tracking Google's own forward-compatible pointer.
 _MODEL_TIERS = {
     "openai": [
-        ("gpt-5.4-mini", "евтин"),
-        ("gpt-5.4", "среден"),
-        ("gpt-5.4-pro", "premium"),
+        ("gpt-5.6-luna", "евтин"),
+        ("gpt-5.6-terra", "среден"),
+        ("gpt-5.6-sol", "premium"),
     ],
     "anthropic": [
         ("claude-haiku-4-5", "евтин"),
@@ -53,7 +77,7 @@ _MODEL_TIERS = {
     ],
     "google_genai": [
         ("gemini-3.5-flash-lite", "евтин"),
-        ("gemini-3.5-flash", "среден"),
+        ("gemini-3.8-flash", "среден"),
         ("gemini-pro-latest", "premium"),
     ],
     # "local" deliberately absent here -- there is no fixed catalog to
@@ -66,28 +90,39 @@ _MODEL_TIERS = {
 # estimated_cost_usd in ai_valuation_runs as an estimate, not a
 # billing-accurate figure, regardless of source:
 #   - claude-* rates: bundled claude-api skill's own authoritative table.
-#   - gemini-3.5-flash-lite: Google's own docs (ai.google.dev), fetched
-#     2026-08-24 -- HIGH confidence. (Two earlier aggregator-tracker
-#     searches for this same model disagreed with each other -- $0.15/$1.25
-#     vs $0.30/$2.50 -- neither matched this official figure; the direct
-#     source wins.)
-#   - everything else (gpt-5.4/-pro, gemini-3.5-flash): public pricing
-#     trackers only, cross-checked across 2+ that roughly agreed -- MEDIUM
-#     confidence (OpenAI's/Google's own pricing pages blocked direct fetch
-#     in this environment).
+#   - gemini-3.5-flash-lite, gemini-3.8-flash: Google's own docs
+#     (ai.google.dev/gemini-api/docs/pricing) -- HIGH confidence.
+#     gemini-3.5-flash-lite's rate corrected 2026-09-15 ($0.25/$1.50 ->
+#     $0.30/$2.50) -- the prior entry was itself already stale/wrong when
+#     re-checked against the official page, independent of this round's
+#     model additions. gemini-3.8-flash's $0.75/$3.75 is an introductory
+#     rate through 2026-12-31; official docs state it rises to $1.50/$7.50
+#     on 2027-01-01 -- revisit this entry after that date.
+#   - gpt-5.6-luna/terra/sol: two independent trackers (eesel.ai, vellum.ai)
+#     agreed exactly on the post-2026-07-30-price-cut rates -- HIGH
+#     confidence (OpenAI's own pricing page blocks direct fetch in this
+#     environment, as before).
+#   - everything else (gpt-5.4/-pro [retired from _MODEL_TIERS above but
+#     kept here for cost-accuracy on any already-recorded historical run],
+#     gemini-3.5-flash): public pricing trackers only, cross-checked across
+#     2+ that roughly agreed -- MEDIUM confidence.
 # gemini-pro-latest has no fixed rate here (it's an alias that can point to
 # a different underlying model over time) -- estimate_cost_usd() returns
 # None for it, shown as "-" in the UI rather than a wrong number.
 # Update this table if a provider reprices.
 _PRICING_PER_1M_USD = {
+    "gpt-5.6-luna": (0.20, 1.20),
+    "gpt-5.6-terra": (2.00, 12.00),
+    "gpt-5.6-sol": (5.00, 30.00),
     "gpt-5.4-mini": (0.75, 4.50),
     "gpt-5.4": (2.50, 15.00),
     "gpt-5.4-pro": (15.00, 90.00),
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-sonnet-5": (3.00, 15.00),
     "claude-opus-5": (5.00, 25.00),
-    "gemini-3.5-flash-lite": (0.25, 1.50),
+    "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.5-flash": (1.50, 9.00),
+    "gemini-3.8-flash": (0.75, 3.75),
 }
 
 # Every provider's chat model class names its "max output tokens" kwarg and
@@ -244,41 +279,69 @@ _TEMPERATURE_RANGE = {
 # not assumed from API docs: a kwarg the class doesn't declare raises at
 # construction time rather than being silently ignored. "local" reuses the
 # ChatOpenAI class itself (see get_chat_model below), so it shares
-# "openai"'s exact field set.
+# "openai"'s exact field set. top_p has no support flag here -- every
+# provider's class declares the field, so it's the per-MODEL overrides below
+# (not this provider-level table) that turn it off where the live API
+# actually rejects it.
+#
+# google_genai frequency_penalty/presence_penalty corrected 2026-09-15 (True
+# -> False): a real, pre-existing bug independent of that day's model
+# upgrade -- found while live-verifying the gpt-5.6/gemini-3.8 additions
+# below. EVERY Gemini model tested (gemini-3.5-flash, -flash-lite,
+# -pro-latest, gemini-2.5-flash, gemini-3.8-flash) rejects both params with
+# `INVALID_ARGUMENT: "Penalty is not enabled for this model"` -- the
+# Generative Language API doesn't expose these on any current model, despite
+# ChatGoogleGenerativeAI declaring the constructor fields. Any real user
+# who'd touched those two sliders with a Gemini model selected would have
+# hit a live 400 before this fix. seed IS genuinely supported (verified).
 _SAMPLING_SUPPORT = {
     "openai":       {"top_k": False, "frequency_penalty": True,  "presence_penalty": True,  "seed": True},
     "anthropic":    {"top_k": True,  "frequency_penalty": False, "presence_penalty": False, "seed": False},
-    "google_genai": {"top_k": True,  "frequency_penalty": True,  "presence_penalty": True,  "seed": True},
+    "google_genai": {"top_k": True,  "frequency_penalty": False, "presence_penalty": False, "seed": True},
     "local":        {"top_k": False, "frequency_penalty": True,  "presence_penalty": True,  "seed": True},
 }
 
-# Real incident (2026-09-11): a user picked gpt-5.4-pro in the chat model
-# picker with presence_penalty set and got a raw
-# "Responses.create() got an unexpected keyword argument 'presence_penalty'"
-# -- _SAMPLING_SUPPORT above is per-PROVIDER, but langchain-openai's
-# ChatOpenAI silently routes certain model ids through OpenAI's Responses
-# API instead of Chat Completions (its own _model_prefers_responses_api()/
-# _RESPONSES_API_ONLY_PREFIXES, mirrored here rather than imported since
-# it's a private name that could change without notice -- verified directly
-# against langchain-openai==1.6.0/openai==3.3.1, the versions installed
-# here). The Responses API's create() has NO frequency_penalty/
-# presence_penalty/seed parameters at all (confirmed via
-# inspect.signature(openai.resources.responses.Responses.create)) -- passing
-# any of them raises a raw TypeError from the openai SDK itself, not a clean
-# LangChain-level error. temperature/top_p ARE supported by both APIs, so
-# those stay enabled for these models.
-_RESPONSES_API_ONLY_OPENAI_PREFIXES = ("gpt-5-pro", "gpt-5.2-pro", "gpt-5.4-pro", "gpt-5.5-pro")
+# Per-model overrides layered on top of the provider defaults above (first
+# matching prefix wins) -- OpenAI's own catalog no longer has one uniform
+# capability profile per provider:
+#   - gpt-5-pro/gpt-5.2-pro/gpt-5.4-pro/gpt-5.5-pro: real incident
+#     (2026-09-11) -- langchain-openai silently routes these through
+#     OpenAI's Responses API instead of Chat Completions (its own
+#     _model_prefers_responses_api()/_RESPONSES_API_ONLY_PREFIXES, mirrored
+#     here rather than imported since it's a private name that could change
+#     without notice -- verified against langchain-openai==1.6.0/
+#     openai==3.3.1). The Responses API's create() has NO
+#     frequency_penalty/presence_penalty/seed parameters at all (confirmed
+#     via inspect.signature(openai.resources.responses.Responses.create))
+#     -- passing any of them raises a raw TypeError from the openai SDK
+#     itself, not a clean LangChain-level error. temperature/top_p ARE
+#     supported by both APIs, so those stay enabled for these models.
+#   - gpt-5.6-luna/terra/sol (2026-09-15): a DIFFERENT restriction, verified
+#     live with a real ChatOpenAI.invoke() per parameter -- these stay on
+#     ordinary Chat Completions (not Responses-API-routed; a rejected param
+#     here comes back as a clean `openai.BadRequestError`/
+#     `OpenAIInvalidRequestError` "Unsupported parameter", not a raw
+#     TypeError). top_p/frequency_penalty/presence_penalty all return that
+#     400; temperature and seed both work fine.
+_OPENAI_MODEL_OVERRIDES: list[tuple[tuple[str, ...], dict]] = [
+    (("gpt-5-pro", "gpt-5.2-pro", "gpt-5.4-pro", "gpt-5.5-pro"),
+     {"frequency_penalty": False, "presence_penalty": False, "seed": False}),
+    (("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"),
+     {"top_p": False, "frequency_penalty": False, "presence_penalty": False}),
+]
 
 
 def _sampling_support(provider: str, model: str | None) -> dict:
-    """Like _SAMPLING_SUPPORT[provider], but narrowed for the specific
-    model when its actual API surface differs from the rest of its
-    provider's models (see _RESPONSES_API_ONLY_OPENAI_PREFIXES above)."""
-    support = dict(_SAMPLING_SUPPORT.get(provider, _SAMPLING_SUPPORT["openai"]))
-    if provider == "openai" and model and model.startswith(_RESPONSES_API_ONLY_OPENAI_PREFIXES):
-        support["frequency_penalty"] = False
-        support["presence_penalty"] = False
-        support["seed"] = False
+    """Like _SAMPLING_SUPPORT[provider] plus an implicit top_p=True, but
+    narrowed for the specific model when its actual API surface differs
+    from the rest of its provider's models (see _OPENAI_MODEL_OVERRIDES
+    above)."""
+    support = {"top_p": True, **_SAMPLING_SUPPORT.get(provider, _SAMPLING_SUPPORT["openai"])}
+    if provider == "openai" and model:
+        for prefixes, override in _OPENAI_MODEL_OVERRIDES:
+            if model.startswith(prefixes):
+                support.update(override)
+                break
     return support
 
 
@@ -295,11 +358,12 @@ def get_sampling_capabilities() -> dict:
     model like gpt-5.4-pro can grey out frequency/presence penalty and seed
     without every other OpenAI model losing them too."""
     caps = {}
-    for provider, (temp_min, temp_max) in _TEMPERATURE_RANGE.items():
-        support = _SAMPLING_SUPPORT[provider]
+    for provider in _TEMPERATURE_RANGE:
+        support = _sampling_support(provider, None)
+        temp_min, temp_max = _TEMPERATURE_RANGE[provider]
         caps[provider] = {
             "temperature": {"min": temp_min, "max": temp_max},
-            "top_p": {"min": 0.0, "max": 1.0},
+            "top_p": {"supported": support["top_p"], "min": 0.0, "max": 1.0},
             "top_k": {"supported": support["top_k"], "min": 1, "max": 500},
             "frequency_penalty": {"supported": support["frequency_penalty"], "min": -2.0, "max": 2.0},
             "presence_penalty": {"supported": support["presence_penalty"], "min": -2.0, "max": 2.0},
@@ -310,11 +374,11 @@ def get_sampling_capabilities() -> dict:
         temp_min, temp_max = _TEMPERATURE_RANGE.get(provider, (0.0, 2.0))
         for model_id, _tier_label in models:
             support = _sampling_support(provider, model_id)
-            if support == _SAMPLING_SUPPORT.get(provider):
+            if support == _sampling_support(provider, None):
                 continue  # no override needed, the provider-level entry already matches
             caps[f"{provider}:{model_id}"] = {
                 "temperature": {"min": temp_min, "max": temp_max},
-                "top_p": {"min": 0.0, "max": 1.0},
+                "top_p": {"supported": support["top_p"], "min": 0.0, "max": 1.0},
                 "top_k": {"supported": support["top_k"], "min": 1, "max": 500},
                 "frequency_penalty": {"supported": support["frequency_penalty"], "min": -2.0, "max": 2.0},
                 "presence_penalty": {"supported": support["presence_penalty"], "min": -2.0, "max": 2.0},
@@ -357,7 +421,7 @@ def build_sampling_kwargs(
     kwargs: dict = {}
     if temperature is not None:
         kwargs["temperature"] = max(temp_min, min(temp_max, temperature))
-    if top_p is not None and not (provider == "anthropic" and temperature is not None):
+    if top_p is not None and support["top_p"] and not (provider == "anthropic" and temperature is not None):
         kwargs["top_p"] = max(0.0, min(1.0, top_p))
     if top_k is not None and support["top_k"]:
         kwargs["top_k"] = max(1, int(top_k))

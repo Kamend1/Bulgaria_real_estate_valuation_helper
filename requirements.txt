@@ -86,6 +86,12 @@ boto3==1.43.0
 # NOT langchain-postgres's VectorStore wrapper, see plan doc for why.
 langchain-core==1.6.0
 langchain-openai==1.6.0
+# openai: langchain-openai depends on it transitively (openai<4.0.0,>=2.45.0)
+# but pip doesn't always keep a transitive dep present across environment
+# churn -- found missing entirely in this env 2026-09-15 (ChatOpenAI couldn't
+# even import), pinned explicitly so a bare `pip install -r requirements.txt`
+# can't silently end up without it again.
+openai==3.3.1
 # langchain-anthropic pins anthropic<1.0.0 itself (still 0.x) -- a known
 # constraint of the integration package, not something pinned here; basic
 # invoke/stream/tool-calling against current models is verified working on

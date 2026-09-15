@@ -168,7 +168,7 @@
 
   function applyCapabilities() {
     var provider = currentProvider();
-    // A specific model (e.g. "openai:gpt-5.4-pro") can have narrower support
+    // A specific model (e.g. "openai:gpt-5.6-sol") can have narrower support
     // than the rest of its provider -- see providers.py's
     // get_sampling_capabilities()/_sampling_support -- so an exact
     // "provider:model" entry wins over the plain provider-keyed default.
@@ -180,7 +180,7 @@
     tempInput.max = caps.temperature.max;
     if (parseFloat(tempInput.value) > caps.temperature.max) tempInput.value = caps.temperature.max;
 
-    ['top_k', 'frequency_penalty', 'presence_penalty', 'seed'].forEach(function (name) {
+    ['top_p', 'top_k', 'frequency_penalty', 'presence_penalty', 'seed'].forEach(function (name) {
       var supported = caps[name] && caps[name].supported;
       var e = els[name];
       if (!e.input) return;
