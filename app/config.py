@@ -74,7 +74,15 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     google_api_key: str = ""
-    # Swappable to "openai" | "anthropic" | "google_genai" | "local"
+    # Mistral AI (2026-09-15) -- added specifically for its EU-only data
+    # residency option (the owner's explicit reason for wanting it): every
+    # Mistral call in providers.py's "mistral" branch is routed through the
+    # dedicated api.eu.mistral.ai endpoint (verified live, same key works
+    # against both), not the default api.mistral.ai one, which Mistral's
+    # own docs describe as "EU by default" but not a hard guarantee the way
+    # the regional endpoint is.
+    mistral_api_key: str = ""
+    # Swappable to "openai" | "anthropic" | "google_genai" | "mistral" | "local"
     llm_default_provider: str = "openai"
     llm_default_embedding_provider: str = "openai"
 

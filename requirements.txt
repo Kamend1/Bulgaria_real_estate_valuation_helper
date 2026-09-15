@@ -98,6 +98,10 @@ openai==3.3.1
 # it regardless (see plan doc).
 langchain-anthropic==1.6.1
 langchain-google-genai==4.3.5
+# Mistral AI (2026-09-15) -- added for its EU-only data-residency endpoint
+# (api.eu.mistral.ai), verified live to work identically to the default
+# endpoint with the same key; see providers.py's "mistral" branch.
+langchain-mistralai==1.1.6
 pgvector==0.5.0
 # langgraph: deliberately AVOIDED earlier in this phase (see providers.py's
 # own docstring -- init_chat_model pulls it in just for one dispatch

@@ -21,6 +21,14 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import settings
 
+# The dedicated EU-region Mistral API endpoint (as opposed to the default
+# api.mistral.ai, which Mistral's own docs describe as "EU by default" but
+# not a hard guarantee) -- confirmed live 2026-09-15 via a real GET
+# /v1/models and a real chat completion, both against this project's real
+# key. Requires the "/v1" suffix (ChatMistralAI's own default is
+# "https://api.mistral.ai/v1"); omitting it 404s every request.
+_MISTRAL_EU_ENDPOINT = "https://api.eu.mistral.ai/v1"
+
 _DEFAULT_MODELS = {
     # Upgraded 2026-09-15: OpenAI's gpt-5.4-*/-pro trio was superseded by the
     # gpt-5.6 Luna/Terra/Sol family (a durable capability-tier naming scheme
@@ -35,6 +43,7 @@ _DEFAULT_MODELS = {
     # being silently decided.
     "anthropic": "claude-haiku-4-5",
     "google_genai": "gemini-3.5-flash-lite",
+    "mistral": "mistral-small-2603",
 }
 
 # 3 tiers per provider (cheap/mid/premium) -- cheap always matches
@@ -80,6 +89,20 @@ _MODEL_TIERS = {
         ("gemini-3.8-flash", "среден"),
         ("gemini-pro-latest", "premium"),
     ],
+    # mistral (2026-09-15): added specifically for its EU-only data-residency
+    # endpoint (see get_chat_model's "mistral" branch) -- confirmed live via
+    # a real GET /v1/models against this account, then a real
+    # ChatMistralAI.invoke()+.bind_tools() call per model. Tier order is
+    # NOT simply small<large<medium by name -- verified against Mistral's
+    # own pricing page (mistral.ai/pricing/api): Large 3 ($0.50/$1.50) is
+    # actually CHEAPER than Medium 3.5 ($1.50/$7.50), so the premium slot is
+    # deliberately "medium", not "large". Don't "fix" this ordering without
+    # re-checking the real prices first.
+    "mistral": [
+        ("mistral-small-2603", "евтин"),
+        ("mistral-large-2512", "среден"),
+        ("mistral-medium-2604", "premium"),
+    ],
     # "local" deliberately absent here -- there is no fixed catalog to
     # hardcode (depends entirely on what the user has loaded in LM Studio/
     # Ollama/vLLM right now). list_available_models() special-cases "local"
@@ -102,6 +125,10 @@ _MODEL_TIERS = {
 #     agreed exactly on the post-2026-07-30-price-cut rates -- HIGH
 #     confidence (OpenAI's own pricing page blocks direct fetch in this
 #     environment, as before).
+#   - mistral-small-2603/large-2512/medium-2604: Mistral's own official
+#     pricing page (mistral.ai/pricing/api), fetched 2026-09-15 -- HIGH
+#     confidence. Note the non-obvious ordering: Large is cheaper than
+#     Medium (see _MODEL_TIERS' comment).
 #   - everything else (gpt-5.4/-pro [retired from _MODEL_TIERS above but
 #     kept here for cost-accuracy on any already-recorded historical run],
 #     gemini-3.5-flash): public pricing trackers only, cross-checked across
@@ -123,6 +150,9 @@ _PRICING_PER_1M_USD = {
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.5-flash": (1.50, 9.00),
     "gemini-3.8-flash": (0.75, 3.75),
+    "mistral-small-2603": (0.15, 0.60),
+    "mistral-large-2512": (0.50, 1.50),
+    "mistral-medium-2604": (1.50, 7.50),
 }
 
 # Every provider's chat model class names its "max output tokens" kwarg and
@@ -132,6 +162,7 @@ _MAX_TOKENS_KWARG = {
     "openai": "max_tokens",
     "anthropic": "max_tokens",
     "google_genai": "max_output_tokens",
+    "mistral": "max_tokens",
     "local": "max_tokens",   # OpenAI-compatible servers use the same name
 }
 
@@ -140,6 +171,11 @@ _PROVIDER_LABELS = {
     "openai": "OpenAI",
     "anthropic": "Claude",
     "google_genai": "Gemini",
+    # "(ЕС)" is load-bearing UI copy, not decoration -- this is the one
+    # provider routed through a dedicated EU-only endpoint (see
+    # get_chat_model), and the label is how an appraiser actually finds it
+    # in the dropdown when EU-only processing matters for a given case.
+    "mistral": "Mistral (ЕС)",
     "local": "Локален модел",
 }
 
@@ -159,6 +195,8 @@ def list_configured_providers() -> list[tuple[str, str]]:
         configured.append(("anthropic", _PROVIDER_LABELS["anthropic"]))
     if settings.google_api_key:
         configured.append(("google_genai", _PROVIDER_LABELS["google_genai"]))
+    if settings.mistral_api_key:
+        configured.append(("mistral", _PROVIDER_LABELS["mistral"]))
     if settings.local_llm_base_url:
         configured.append(("local", _PROVIDER_LABELS["local"]))
     return configured
@@ -270,6 +308,9 @@ _TEMPERATURE_RANGE = {
     "openai": (0.0, 2.0),
     "anthropic": (0.0, 1.0),
     "google_genai": (0.0, 2.0),
+    # mistral (2026-09-15): verified live -- ChatMistralAI raises a client-
+    # side validation error for temperature > 1.0, same ceiling as Anthropic.
+    "mistral": (0.0, 1.0),
     "local": (0.0, 2.0),
 }
 
@@ -294,10 +335,20 @@ _TEMPERATURE_RANGE = {
 # ChatGoogleGenerativeAI declaring the constructor fields. Any real user
 # who'd touched those two sliders with a Gemini model selected would have
 # hit a live 400 before this fix. seed IS genuinely supported (verified).
+#
+# mistral (2026-09-15): verified live against all 3 tiers (small/large/
+# medium) with real requests -- temperature/top_p/frequency_penalty/
+# presence_penalty all succeed (the last two go through ChatMistralAI's
+# model_kwargs fallback with a UserWarning since the class doesn't declare
+# them as typed fields, but Mistral's own API accepts them); top_k returns
+# a clean 400 "top_k sampling is not enabled for this model" on every tier
+# tested; seed returns a 422 "Extra inputs are not permitted" -- not
+# supported at all, unlike OpenAI/Google's "best effort" seed.
 _SAMPLING_SUPPORT = {
     "openai":       {"top_k": False, "frequency_penalty": True,  "presence_penalty": True,  "seed": True},
     "anthropic":    {"top_k": True,  "frequency_penalty": False, "presence_penalty": False, "seed": False},
     "google_genai": {"top_k": True,  "frequency_penalty": False, "presence_penalty": False, "seed": True},
+    "mistral":      {"top_k": False, "frequency_penalty": True,  "presence_penalty": True,  "seed": False},
     "local":        {"top_k": False, "frequency_penalty": True,  "presence_penalty": True,  "seed": True},
 }
 
@@ -503,6 +554,19 @@ def get_chat_model(
             raise RuntimeError("GOOGLE_API_KEY is not set -- add it to .env")
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model=model, google_api_key=settings.google_api_key, **kwargs)
+
+    if provider == "mistral":
+        if not settings.mistral_api_key:
+            raise RuntimeError("MISTRAL_API_KEY is not set -- add it to .env")
+        from langchain_mistralai import ChatMistralAI
+        # Routed through the dedicated EU-region endpoint (verified live,
+        # 2026-09-15, same key works against both) rather than the default
+        # api.mistral.ai -- this provider exists specifically for a hard
+        # EU-data-residency guarantee, not just "a model from an EU company".
+        # Note the required "/v1" suffix: ChatMistralAI's own default is
+        # "https://api.mistral.ai/v1", and omitting it here silently 404s
+        # every request (caught live while wiring this up).
+        return ChatMistralAI(model=model, mistral_api_key=settings.mistral_api_key, endpoint=_MISTRAL_EU_ENDPOINT, **kwargs)
 
     if provider == "local":
         if not settings.local_llm_base_url:
