@@ -226,17 +226,29 @@ def _persist_call_log(db: Session, conversation_id, provider: str, model_id: str
     """Same shape as valuation_chain._persist_call_log, but keyed by
     conversation_id instead of ai_valuation_run_id -- agent_llm_calls
     supports both (see its own docstring). Best-effort, never fails the
-    turn."""
+    turn.
+
+    Real bug found during Phase 15 Tier 2's live verification (2026-09-15):
+    every entry used to be persisted under the TURN's own provider/model
+    unconditionally, even when the entry carried its own "provider"/"model"
+    keys (as critic_graph.run_cross_check's and run_critical_review's
+    entries do) -- silently mislabeling a cross-model verifier's actual
+    provider/cost as whichever model produced the claim being checked,
+    defeating the point of a cross-model audit trail. Entries without their
+    own provider/model (the common case -- every specialist's own steps)
+    fall back to the turn's provider/model exactly as before."""
     if not call_log:
         return
     try:
         for entry in call_log:
-            cost = estimate_cost_usd(model_id, entry["input_tokens"], entry["output_tokens"], provider=provider)
+            entry_provider = entry.get("provider") or provider
+            entry_model = entry.get("model") or model_id
+            cost = estimate_cost_usd(entry_model, entry["input_tokens"], entry["output_tokens"], provider=entry_provider)
             db.add(AgentLlmCall(
                 conversation_id=conversation_id,
                 call_label=entry["call_label"],
-                provider=provider,
-                model=model_id,
+                provider=entry_provider,
+                model=entry_model,
                 input_tokens=entry["input_tokens"],
                 output_tokens=entry["output_tokens"],
                 estimated_cost_usd=cost,

@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 from typing import Callable, Literal, TypedDict
 
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
@@ -42,10 +42,11 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from app.db.models import AppraisalReport, LegalDocumentChunk, MarketDocument
+from app.services.comparable_service import get_pool_with_stats
 from app.services.llm import critic_graph
 from app.services.llm.analyst_tools import build_analyst_tools
 from app.services.llm.embeddings import get_embeddings_model, resolve_embedding_model
-from app.services.llm.providers import get_chat_model, is_length_truncated
+from app.services.llm.providers import get_chat_model, is_length_truncated, list_configured_providers, resolve_chat_model
 from app.services.llm.tools import (
     _income_valuation_description,
     _income_valuation_fn,
@@ -73,6 +74,7 @@ OnProgress = Callable[[str], None]
 _SPECIALIST_DISPLAY_NAMES = {
     "income": "доходен подход", "market": "пазарен подход",
     "market_analysis": "пазарен анализ", "legal": "правно/етично",
+    "zoning": "градоустройство", "comp_quality": "качество на сравнимите",
 }
 
 # Hard ceiling on how many specialists can run in ONE turn's cycle before
@@ -92,17 +94,22 @@ class OrchestratorState(TypedDict):
 
 
 class RouteDecision(BaseModel):
-    next: Literal["income", "market", "market_analysis", "legal", "auditor", "answer", "done"] = Field(
+    next: Literal[
+        "income", "market", "market_analysis", "legal", "zoning", "comp_quality", "auditor", "answer", "done",
+    ] = Field(
         description=(
             "Кой специалист да поеме тази реплика: 'income' (доходен подход/DCF/"
             "капитализация), 'market' (сравними обяви/пазарен подход/описание на имота/"
             "документи), 'market_analysis' (по-широк пазарен анализ извън тази конкретна "
             "сделка -- времеви редове, сравнение на квартали/типове строителство), "
-            "'legal' (правни/етични въпроси), 'auditor' (критичен преглед на целия "
-            "доклад), 'answer' ако въпросът е достатъчно прост/общ да отговориш директно, "
-            "без специалист (напр. поздрав, въпрос какво умееш), или 'done' САМО ако поне "
-            "един специалист вече е отговорил ТОЗИ ход и това е достатъчно -- никога 'done' "
-            "като първи избор."
+            "'legal' (правни/етични въпроси), 'zoning' (устройствена зона/Кинт/плътност/"
+            "височина/озеленяване, съответствие на предполагаемото ползване с "
+            "градоустройствения статут, само за София), 'comp_quality' (критична преценка "
+            "дали ЗАКАЧЕНИТЕ в пула сравними са реално съпоставими, не просто статистика), "
+            "'auditor' (критичен преглед на целия доклад), 'answer' ако въпросът е "
+            "достатъчно прост/общ да отговориш директно, без специалист (напр. поздрав, "
+            "въпрос какво умееш), или 'done' САМО ако поне един специалист вече е отговорил "
+            "ТОЗИ ход и това е достатъчно -- никога 'done' като първи избор."
         )
     )
     reasoning: str = Field(description="Едно кратко изречение защо.")
@@ -124,6 +131,70 @@ _SUPERVISOR_PROMPT = """Ти си диспечер (supervisor) в екип от
 бъдеш попитан отново след неговия отговор и тогава можеш да насочиш към втория, или да
 избереш 'done', ако вече е достатъчно. Максимум {max_hops} специалиста на ход -- не се
 опитвай да събереш повече."""
+
+
+# Fields propose_text_update targets that feed directly into the report's
+# own valuation/legal rationale sections (see tools.py's _FIELD_RISK_TIER,
+# "medium" tier) -- the only ones _maybe_cross_check_proposal below spends
+# an extra model call verifying. subject_description/appraiser_notes are
+# free commentary the appraiser edits anyway and are deliberately excluded,
+# to keep the routine case (most proposals) at today's cost.
+_CROSS_CHECK_FIELDS = {"submarket_rationale", "income_market_rationale", "legal_description"}
+
+# Preferred order when rotating to a DIFFERENT provider than the one that
+# produced a claim -- just a tie-breaker among whichever providers are
+# actually configured (see _pick_different_provider); not itself a
+# capability ranking.
+_PROVIDER_ROTATION = ("anthropic", "openai", "google_genai")
+
+
+def _pick_different_provider(current: str) -> str:
+    """Phase 15 Tier 2 (2026-09-15): picks a configured provider guaranteed
+    different from `current`, for the cross-check's verifier model -- the
+    whole point is a model that did NOT produce the claim being checked.
+    Falls back to `current` if it's the only provider configured (nothing
+    else to pick -- the caller's cross-check becomes a same-model second
+    opinion in that case, still better than none, but callers should not
+    rely on that happening)."""
+    configured = [p for p, _label in list_configured_providers() if p != current]
+    if not configured:
+        return current
+    for p in _PROVIDER_ROTATION:
+        if p in configured:
+            return p
+    return configured[0]
+
+
+def _maybe_cross_check_proposal(
+    db: Session, report_id, current_provider: str, tool_result: dict, call_log: list[dict], call_label_prefix: str,
+) -> str | None:
+    """Phase 15 Tier 2 (2026-09-15): after a specialist proposes text for one
+    of the "medium risk" narrative fields (_CROSS_CHECK_FIELDS), get a second
+    opinion from a model that did NOT produce the claim, checking it against
+    the same grounding data the auditor uses (critic_graph.run_cross_check).
+    Never blocks the propose card -- the owner's explicit choice -- only
+    returns a visible warning string when the two models disagree; None
+    (no extra message) when they agree, so the routine/agreeing case adds
+    nothing to the chat transcript beyond the one extra logged LLM call.
+    Any failure here (model error, missing report) is swallowed -- a failed
+    second opinion must never break the specialist's own turn."""
+    if not (tool_result.get("proposed") and tool_result.get("field") in _CROSS_CHECK_FIELDS):
+        return None
+    try:
+        report = db.get(AppraisalReport, report_id)
+        if report is None:
+            return None
+        verifier_provider, verifier_model = resolve_chat_model(_pick_different_provider(current_provider), None)
+        verdict, sub_call_log = critic_graph.run_cross_check(
+            db, report, verifier_provider, verifier_model, tool_result.get("text", ""),
+        )
+    except Exception:
+        return None
+    for entry in sub_call_log:
+        call_log.append({**entry, "call_label": f"{call_label_prefix}_crosscheck"})
+    if verdict.get("agrees", True):
+        return None
+    return f"⚠️ Втора проверка ({verifier_provider}) отбеляза различие: {verdict.get('note', '')}"
 
 
 def _build_tool_loop(
@@ -182,6 +253,10 @@ def _build_tool_loop(
                 result_json = json.dumps(result, default=str, ensure_ascii=False)
                 messages.append(ToolMessage(content=result_json, tool_call_id=call["id"]))
                 on_message("tool", result_json, None, call["id"])
+                if call["name"] == "propose_text_update":
+                    warning = _maybe_cross_check_proposal(db, report_id, provider, result, call_log, call_label_prefix)
+                    if warning:
+                        on_message("assistant", warning, None, None, False)
         else:
             # Every one of max_iterations rounds called a tool again --
             # never happened to land on a plain-text final answer (real
@@ -311,10 +386,17 @@ def _auditor_node_fn(
         on_progress("Правя критичен преглед на доклада…")
         critique, sub_call_log = critic_graph.run_critical_review(db, report, provider, model)
         for entry in sub_call_log:
+            # provider/model preserved from the sub_call_log entry (real bug
+            # fixed 2026-09-15, see assistant_chain._persist_call_log's own
+            # note) -- run_critical_review resolves its own provider/model,
+            # which can differ from the turn's if a caller ever passes one
+            # explicitly (tools.py's request_critical_review already can).
             call_log.append({
                 "call_label": f"msg{msg_seq}_auditor",
                 "input_tokens": entry.get("input_tokens", 0),
                 "output_tokens": entry.get("output_tokens", 0),
+                "provider": entry.get("provider"),
+                "model": entry.get("model"),
             })
         result_json = json.dumps(critique, default=str, ensure_ascii=False)
         # Persisted as a tool-call/tool-result pair shaped exactly like the
@@ -329,6 +411,74 @@ def _auditor_node_fn(
         persist_finding(db, report.id, "auditor", memory_source, memory_source_id, summary)
         return {"findings": {**state.get("findings", {}), "auditor": summary}}
     return node
+
+
+def _get_zoning_info_fn(report: AppraisalReport):
+    def get_zoning_info() -> dict:
+        """Returns the subject's zoning/cadastre data (Phase 15 Tier 3,
+        2026-09-15) -- устройствена зона (Кинт/плътност/височина/озеленяване),
+        recent НАГ София development-plan case activity referencing this
+        parcel, and basic parcel/building facts. This data is ALREADY fetched
+        for the comparables page's own GIS sanity-check panel but was never
+        exposed to any LLM before this tool -- Sofia-only (isofmap.bg/НАГ
+        София have no coverage elsewhere); zoning.confidence will be
+        "unavailable" outside Sofia or when the lookup fails, and this tool
+        says so explicitly rather than fabricating zoning parameters."""
+        from app.services import gis_service
+        data = gis_service.get_cadastre_panel_data(report)
+        if not data.get("ok"):
+            return {"available": False, "reason": data.get("reason"), "detail": data.get("detail")}
+        zoning = data.get("zoning")
+        parcel = data.get("parcel")
+        plans = data.get("development_plans") or []
+        return {
+            "available": True,
+            "parcel": {
+                "cadastral_id": getattr(parcel, "cadastral_id", None),
+                "area_sqm": getattr(parcel, "area_sqm", None),
+            } if parcel else None,
+            "total_building_area_sqm": data.get("total_building_area_sqm"),
+            "zoning": {
+                "confidence": getattr(zoning, "confidence", "unavailable"),
+                "zone_code": getattr(zoning, "zone_code", None),
+                "zone_description": getattr(zoning, "zone_description", None),
+                "max_density_pct": getattr(zoning, "max_density_pct", None),
+                "max_kint": getattr(zoning, "max_kint", None),
+                "max_height_m": getattr(zoning, "max_height_m", None),
+                "min_landscaping_pct": getattr(zoning, "min_landscaping_pct", None),
+                "plan_name": getattr(zoning, "plan_name", None),
+            } if zoning else None,
+            "development_plans": [
+                {"reference": p.reference, "scope_text": p.scope_text, "procedure_type": p.procedure_type}
+                for p in plans
+            ],
+        }
+    return get_zoning_info
+
+
+def _get_pool_quality_detail_fn(db: Session, report: AppraisalReport):
+    def get_pool_quality_detail(comparable_type: str = "sale") -> dict:
+        """Returns per-comparable detail for the MANUALLY PINNED comparables in
+        the report's pool (Phase 15 Tier 3, 2026-09-15) -- each one's own
+        adjustment_factors breakdown (market/location/size/floor/condition, if
+        set), adjustment_pct, adjusted price/sqm, area, floor, construction --
+        alongside the pool-wide percentile stats, so you can judge whether a
+        specific pinned comparable is genuinely comparable (right submarket,
+        plausible size/condition match) rather than just statistically present
+        in the pool. comparable_type: "sale" or "rent"."""
+        pool = get_pool_with_stats(db, comparable_type, report.id)
+        pinned = [
+            {
+                "listing_id": r["listing_id"], "location": f"{r.get('title_city_model') or ''} {r.get('title_geo_2_model') or ''}".strip(),
+                "area_sqm": r.get("area_sqm_model"), "price_per_sqm": r.get("price_per_sqm_model"),
+                "adjustment_pct": r.get("adjustment_pct"), "adjustment_factors": r.get("adjustment_factors"),
+                "adj_ppsqm": r.get("adj_ppsqm"), "floor_model": r.get("floor_model"),
+                "construction_type_model": r.get("construction_type_model"), "analyst_note": r.get("analyst_note"),
+            }
+            for r in pool["rows"] if r["pinned_for_report"]
+        ]
+        return {"pinned_comparables": pinned, "pool_stats": pool["stats"], "pinned_count": pool["pinned_count"]}
+    return get_pool_quality_detail
 
 
 def _list_legal_documents_fn(db: Session):
@@ -354,6 +504,45 @@ def _list_legal_documents_fn(db: Session):
             ]
         }
     return list_legal_documents
+
+
+# Legal-lead delegation (Phase 15 Tier 3.3, 2026-09-15): if the retrieved
+# chunks are large, a CHEAP model extracts just the parts relevant to the
+# query before the legal specialist's own (potentially pricier) model ever
+# sees them -- mirrors the "lead delegates reading to a cheap worker, keeps
+# synthesis for itself" multi-agent pattern, implemented here as a
+# deterministic tool-RESULT modification rather than a new graph node: no
+# new specialist to route to, just a compression step on this one tool's
+# output, closer to what the retrieved text actually needs.
+_LEGAL_CHUNK_COMPRESSION_THRESHOLD_CHARS = 6000
+
+
+def _compress_legal_chunks(sections: list[dict], query: str) -> list[dict]:
+    """Best-effort: any failure here just returns the sections unmodified
+    rather than losing the retrieval result the legal specialist needs."""
+    total_chars = sum(len(s.get("text", "")) for s in sections)
+    if total_chars <= _LEGAL_CHUNK_COMPRESSION_THRESHOLD_CHARS:
+        return sections
+    try:
+        from app.services.llm.providers import get_default_model
+        cheap_model = get_default_model("openai")
+        chat = get_chat_model("openai", cheap_model, max_tokens=1500)
+        raw = "\n\n".join(f"[{s.get('heading') or '—'}]\n{s.get('text', '')}" for s in sections)
+        response = chat.invoke([
+            SystemMessage(content=(
+                "Обобщи/съкрати текста по-долу до частите, релевантни за въпроса, без да "
+                "губиш точни номера на членове/алинеи и без да перифразираш правния текст -- "
+                "цитирай дословно релевантните изречения, само пропускай нерелевантните "
+                "части. Въпрос: " + query
+            )),
+            HumanMessage(content=raw),
+        ])
+        compressed_text = _extract_text(response.content)
+        if not compressed_text:
+            return sections
+        return [{"heading": "обобщени релевантни части (сгъстено от помощен модел)", "text": compressed_text}]
+    except Exception:
+        return sections
 
 
 def _search_legal_document_fn(db: Session):
@@ -396,9 +585,10 @@ def _search_legal_document_fn(db: Session):
                 "note": "Няма индексирани части за този документ -- пълен текст (ограничен до 20000 знака).",
                 "fallback_full_text": (data.get("full_text") or "")[:20000],
             }
+        sections = [{"heading": r["heading"], "text": r["text"]} for r in rows]
         return {
             "filename": doc.filename,
-            "sections": [{"heading": r["heading"], "text": r["text"]} for r in rows],
+            "sections": _compress_legal_chunks(sections, query),
         }
     return search_legal_document
 
@@ -409,7 +599,8 @@ def _route_from_supervisor(state: OrchestratorState) -> str:
 
 _SUPERVISOR_ROUTES = {
     "income": "income", "market": "market", "market_analysis": "market_analysis",
-    "legal": "legal", "auditor": "auditor", "answer": "direct_answer", "done": "synthesize",
+    "legal": "legal", "zoning": "zoning", "comp_quality": "comp_quality",
+    "auditor": "auditor", "answer": "direct_answer", "done": "synthesize",
 }
 
 
@@ -428,6 +619,7 @@ def build_orchestrator_graph(
     on_message: OnMessage,
     memory_source: str = "chat",
     memory_source_id=None,
+    model_overrides: dict[str, tuple[str, str]] | None = None,
 ):
     """Builds a fresh graph for this turn (mirrors build_assistant_tools()
     being reconstructed fresh per turn too -- no cross-turn caching, DB is
@@ -442,11 +634,29 @@ def build_orchestrator_graph(
     a report_compile_runs.id for the Report Compiler action
     (comparables.py) -- so report_agent_findings stays traceable back to
     its origin without a hard FK to either table (see the model's own
-    docstring for why)."""
+    docstring for why).
+
+    model_overrides (Phase 15 Tier 1, 2026-09-15): optional {domain:
+    (provider, model)} map letting individual specialists run on a
+    different model than the turn's default -- the centerpiece plumbing
+    for cross-model verification (Tier 2) and per-specialist model choice.
+    Every specialist node already resolves its own chat model independently
+    inside _build_tool_loop's closure; this just lets base_kwargs hand each
+    one a different (provider, model) instead of the same pair every time.
+    No caller passes this yet -- omitted/empty means every node gets the
+    exact (provider, model_id) pair it always has, byte-for-byte unchanged.
+    sampling_kwargs is only applied to nodes running the DEFAULT (provider,
+    model_id) -- an overridden node gets no sampling overrides (safe
+    defaults) rather than risk forwarding a param that isn't valid for a
+    different provider/model (see providers.py's per-model sampling
+    support quirks -- gpt-5.6-*/Claude Fable 5.1 style restrictions)."""
 
     def base_kwargs(prefix: str):
+        override_provider, override_model = (model_overrides or {}).get(prefix, (provider, model_id))
+        is_overridden = (override_provider, override_model) != (provider, model_id)
         return dict(
-            provider=provider, model_id=model_id, sampling_kwargs=sampling_kwargs, max_tokens=max_tokens,
+            provider=override_provider, model_id=override_model,
+            sampling_kwargs={} if is_overridden else sampling_kwargs, max_tokens=max_tokens,
             max_iterations=max_tool_iterations, call_log=call_log, call_label_prefix=f"msg{msg_seq}_{prefix}",
             on_progress=on_progress, on_message=on_message,
             db=db, report_id=report.id, memory_source=memory_source, memory_source_id=memory_source_id,
@@ -456,6 +666,8 @@ def build_orchestrator_graph(
     market_tools, market_prompt, market_step_label = build_specialist_tools_and_prompt("market", db, report, documents_note)
     market_analysis_tools, market_analysis_prompt, market_analysis_step_label = build_specialist_tools_and_prompt("market_analysis", db, report, documents_note)
     legal_tools, legal_prompt, legal_step_label = build_specialist_tools_and_prompt("legal", db, report, documents_note)
+    zoning_tools, zoning_prompt, zoning_step_label = build_specialist_tools_and_prompt("zoning", db, report, documents_note)
+    comp_quality_tools, comp_quality_prompt, comp_quality_step_label = build_specialist_tools_and_prompt("comp_quality", db, report, documents_note)
 
     report_memory_block = format_report_memory(get_report_memory(db, report.id))
 
@@ -465,13 +677,15 @@ def build_orchestrator_graph(
     graph.add_node("market", _build_tool_loop(tools=market_tools, system_prompt=market_prompt, step_label=market_step_label, **base_kwargs("market")))
     graph.add_node("market_analysis", _build_tool_loop(tools=market_analysis_tools, system_prompt=market_analysis_prompt, step_label=market_analysis_step_label, **base_kwargs("market_analysis")))
     graph.add_node("legal", _build_tool_loop(tools=legal_tools, system_prompt=legal_prompt, step_label=legal_step_label, **base_kwargs("legal")))
+    graph.add_node("zoning", _build_tool_loop(tools=zoning_tools, system_prompt=zoning_prompt, step_label=zoning_step_label, **base_kwargs("zoning")))
+    graph.add_node("comp_quality", _build_tool_loop(tools=comp_quality_tools, system_prompt=comp_quality_prompt, step_label=comp_quality_step_label, **base_kwargs("comp_quality")))
     graph.add_node("auditor", _auditor_node_fn(db, report, provider, model_id, call_log, msg_seq, on_progress, on_message, memory_source, memory_source_id))
     graph.add_node("direct_answer", _direct_answer_node_fn(on_message))
     graph.add_node("synthesize", _synthesize_node_fn(provider, model_id, call_log, msg_seq, on_progress, on_message))
 
     graph.set_entry_point("supervisor")
     graph.add_conditional_edges("supervisor", _route_from_supervisor, _SUPERVISOR_ROUTES)
-    for node_name in ("income", "market", "market_analysis", "legal"):
+    for node_name in ("income", "market", "market_analysis", "legal", "zoning", "comp_quality"):
         graph.add_conditional_edges(node_name, _route_after_specialist, {"supervisor": "supervisor", "synthesize": "synthesize"})
     graph.add_edge("auditor", END)
     graph.add_edge("direct_answer", END)
@@ -572,5 +786,43 @@ def build_specialist_tools_and_prompt(
             "вместо това."
         )
         return tools, prompt, "Мисля (правно/етично)"
+
+    if domain == "zoning":
+        tools = [
+            StructuredTool.from_function(_get_zoning_info_fn(report), name="get_zoning_info"),
+            StructuredTool.from_function(_propose_text_update_fn(report), name="propose_text_update", description="Propose new text for legal_description (правно и градоустройствено описание). Never writes -- returns a proposal the appraiser must apply."),
+        ]
+        prompt = (
+            "Ти си специалист по ГРАДОУСТРОЙСТВО за оценка на недвижими имоти -- устройствена "
+            "зона, Кинт (интензивност на застрояване), плътност на застрояване, максимална "
+            "височина, минимално озеленяване. Винаги викай get_zoning_info -- никога не гадай "
+            "зонови параметри. Провери дали предполагаемото/съществуващото ползване и обем на "
+            "сградата изглеждат съвместими със зоната -- отбележи ясно всяко съществено "
+            "разминаване (напр. застроена площ/височина над зоновите лимити). Ако "
+            "confidence='unavailable' или инструментът каже, че обектът е извън София -- кажи "
+            "го изрично и не измисляй зонови параметри вместо това. Ако оценителят поиска да "
+            "запишеш правно/градоустройствено описание -- викай propose_text_update с "
+            "field='legal_description', никога не пиши директно в отговора си вместо това."
+        )
+        return tools, prompt, "Мисля (градоустройство)"
+
+    if domain == "comp_quality":
+        tools = [
+            StructuredTool.from_function(_get_pool_quality_detail_fn(db, report), name="get_pool_quality_detail"),
+            StructuredTool.from_function(_propose_text_update_fn(report), name="propose_text_update", description="Propose new text for submarket_rationale. Never writes -- returns a proposal the appraiser must apply."),
+        ]
+        prompt = (
+            "Ти си специалист по КАЧЕСТВО НА СРАВНИМИТЕ -- критично преценяваш дали ЗАКАЧЕНИТЕ "
+            "(pinned) в пула сравними на този доклад са реално съпоставими с обекта, не просто "
+            "статистически налични. Винаги викай get_pool_quality_detail -- никога не смятай "
+            "статистика наум. За всеки закачен сравним прецени: съответства ли площта разумно "
+            "на обекта (силно разминаване = по-малко тегло), има ли смислена adjustment_factors "
+            "разбивка или е оставен без корекция въпреки видима разлика, изглежда ли construction_"
+            "type/floor съвместим. Отбележи ИЗРИЧНО конкретни слаби сравними (с listing_id), не "
+            "просто повтаряй pool_stats. Ако оценителят поиска обосновка на съпоставимата зона -- "
+            "викай propose_text_update с field='submarket_rationale', никога не пиши директно в "
+            "отговора си вместо това."
+        )
+        return tools, prompt, "Мисля (качество на сравнимите)"
 
     raise ValueError(f"Unknown specialist domain: {domain!r}")

@@ -20,7 +20,7 @@ from app.dependencies import require_auth as get_current_user
 from app.rate_limit import limiter
 from app.routers.comparables import _active_report
 from app.services import documents as documents_service
-from app.services.comparable_service import get_draft_reports_for_user, update_appraiser_notes, update_income_market_rationale, update_submarket_rationale, update_subject
+from app.services.comparable_service import get_draft_reports_for_user, update_appraiser_notes, update_income_market_rationale, update_legal_description, update_submarket_rationale, update_subject
 from app.services.llm import chat_store
 from app.services.llm.assistant_chain import (
     ChatProgress, get_conversation_for_user, get_or_create_conversation,
@@ -42,6 +42,7 @@ _APPLY_HANDLERS = {
     "submarket_rationale": update_submarket_rationale,
     "income_market_rationale": update_income_market_rationale,
     "appraiser_notes": update_appraiser_notes,
+    "legal_description": update_legal_description,
 }
 
 

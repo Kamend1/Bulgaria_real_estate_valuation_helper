@@ -151,3 +151,61 @@ def run_critical_review(
     graph = build_critic_graph(db, report, provider, model, call_log)
     final_state = graph.invoke({"report_id": str(report.id), "context": {}, "critique": {}})
     return final_state["critique"], call_log
+
+
+class CrossCheckResult(BaseModel):
+    agrees: bool = Field(description="True ако твърдението изглежда съвместимо с данните за доклада, False ако има реално разминаване")
+    note: str = Field(default="", description="Ако agrees=False, едно кратко изречение какво точно не съвпада; иначе празно")
+
+
+_CROSS_CHECK_SYSTEM_PROMPT = """Ти правиш бърза втора проверка на едно конкретно твърдение,
+предложено от друг AI специалист, СРЕЩУ реалните данни на доклада (JSON по-долу) -- не
+пренаписваш текста, само преценяваш дали изглежда съвместимо с числата/статистиката.
+Провери конкретно дали твърдението противоречи на sale_pool_stats/rent_pool_stats/
+concluded стойностите/AVM прогнозата. Бъди кратък и конкретен -- не отбелязвай стилови
+предпочитания, само фактически несъответствия. Ако нямаш достатъчно данни да прецениш,
+кажи agrees=True (не измисляй несъответствие, за да запълниш поле)."""
+
+
+def run_cross_check(
+    db: Session, report: AppraisalReport,
+    provider: str, model: str, claim_text: str,
+) -> tuple[dict, list[dict]]:
+    """Cross-model verification (Phase 15 Tier 2, 2026-09-15): compares one
+    specialist's proposed text against the SAME grounding data
+    run_critical_review's own gather_context step collects, but on a model
+    DIFFERENT from whichever specialist produced the claim (the caller,
+    orchestrator_graph.py's _maybe_cross_check_proposal, is responsible for
+    picking that different provider/model). Read-only, same "never silently
+    write" guardrail as run_critical_review -- this only ever produces a
+    short verdict surfaced as a warning to the appraiser, never edits
+    anything itself. Reuses _gather_context_node directly (called once,
+    not run as its own graph) rather than building a second StateGraph for
+    what is a single linear gather-then-ask step, no branching to justify
+    the graph machinery -- same reasoning report_compiler.py's own
+    docstring gives for staying a plain loop."""
+    call_log: list[dict] = []
+    context = _gather_context_node(db, report)({"report_id": str(report.id), "context": {}, "critique": {}})["context"]
+    chat = get_chat_model(provider, model, max_tokens=300)
+    structured = chat.with_structured_output(CrossCheckResult, include_raw=True)
+    result = structured.invoke([
+        SystemMessage(content=_CROSS_CHECK_SYSTEM_PROMPT),
+        HumanMessage(content=json.dumps({"claim": claim_text, "report_context": context}, default=str, ensure_ascii=False)),
+    ])
+    raw_msg = result.get("raw")
+    usage = (getattr(raw_msg, "usage_metadata", None) or {}) if raw_msg is not None else {}
+    call_log.append({
+        "call_label": "crosscheck",
+        "input_tokens": usage.get("input_tokens", 0),
+        "output_tokens": usage.get("output_tokens", 0),
+        # Real bug found during live verification (2026-09-15): without
+        # these, _persist_call_log fell back to the TURN's own
+        # provider/model -- silently mislabeling the verifier's cost/model
+        # in agent_llm_calls as whichever model produced the claim being
+        # checked, defeating the whole point of a cross-model audit trail.
+        "provider": provider,
+        "model": model,
+    })
+    parsed = result.get("parsed")
+    verdict = parsed.model_dump() if parsed is not None else {"agrees": True, "note": ""}
+    return verdict, call_log

@@ -185,6 +185,24 @@ _PROPOSABLE_FIELDS = {
     "submarket_rationale": "Обосновката на съпоставимата зона (пазарен подход)",
     "income_market_rationale": "Обосновката на доходния подход",
     "appraiser_notes": "Бележки на оценителя (свободен текст, вкл. правни/пазарни наблюдения)",
+    "legal_description": "Правно и градоустройствено описание (GIS/кадастър)",
+}
+
+# Risk tiers (Phase 15 Tier 2, 2026-09-15) -- documentation-weight only, no
+# gating behavior here: subject_description/appraiser_notes are free
+# commentary the appraiser edits anyway ("low"); submarket_rationale/
+# income_market_rationale/legal_description feed directly into the report's
+# own valuation/legal rationale sections ("medium") and are the fields
+# orchestrator_graph.py's cross-check targets -- see
+# _maybe_cross_check_proposal there. Never used to block a proposal from
+# being offered, only to flag it more visibly; see _messages.html's
+# proposal-card badge.
+_FIELD_RISK_TIER = {
+    "subject_description": "low",
+    "appraiser_notes": "low",
+    "submarket_rationale": "medium",
+    "income_market_rationale": "medium",
+    "legal_description": "medium",
 }
 
 
@@ -214,9 +232,10 @@ def _retrieve_comparables_fn(db: Session, report: AppraisalReport, comparable_ty
 def _propose_text_update_fn(report: AppraisalReport):
     def propose_text_update(field: str, new_text: str) -> dict:
         """Propose new text for one of the report's free-text fields:
-        subject_description, submarket_rationale, income_market_rationale, or
+        subject_description, submarket_rationale, income_market_rationale,
+        legal_description (правно/градоустройствено описание), or
         appraiser_notes (general notes -- use this one for legal/market-analysis
-        observations that don't fit the other three).
+        observations that don't fit the other four).
         This does NOT save anything -- it only returns a proposal that the
         appraiser sees as a card in the chat with an explicit "Приложи"
         (Apply) button. Nothing is ever written to the report without the
@@ -230,6 +249,7 @@ def _propose_text_update_fn(report: AppraisalReport):
             "proposed": True,
             "field": field,
             "field_label": _PROPOSABLE_FIELDS[field],
+            "risk_tier": _FIELD_RISK_TIER.get(field, "low"),
             "text": new_text,
         }
     return propose_text_update
@@ -337,10 +357,14 @@ def build_assistant_tools(
     tools.append(StructuredTool.from_function(
         _propose_text_update_fn(report), name="propose_text_update",
         description=(
-            "Propose new text for subject_description, submarket_rationale, or "
-            "income_market_rationale. Never writes anything -- returns a proposal "
-            "the appraiser must explicitly apply. Always use this tool (not a plain "
-            "reply) when asked to draft/update one of these fields."
+            # Built from _PROPOSABLE_FIELDS rather than hand-listed (real,
+            # pre-existing bug found 2026-09-15: this string used to name
+            # only 3 of the 4 fields, silently omitting appraiser_notes) --
+            # a future field addition can't drift out of sync here again.
+            "Propose new text for one of: " + ", ".join(sorted(_PROPOSABLE_FIELDS)) + ". "
+            "Never writes anything -- returns a proposal the appraiser must explicitly "
+            "apply. Always use this tool (not a plain reply) when asked to draft/update "
+            "one of these fields."
         ),
     ))
     return tools

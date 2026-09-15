@@ -279,6 +279,42 @@ async def ai_generate_start(
     )
 
 
+@router.post("/ai-generate-compare", response_class=HTMLResponse)
+@limiter.limit("10/hour")
+async def ai_generate_compare_start(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    provider_model_a: str = Form(""),
+    provider_model_b: str = Form(""),
+    include_income: bool = Form(False),
+):
+    """Phase 15 Tier 2 (2026-09-15): runs generate_valuation_backbone() on
+    TWO providers independently, side by side, unranked -- the appraiser
+    picks manually, nothing is auto-averaged or auto-selected (see the
+    Second Opinion Protocol proposal's explicit "never silently pick a
+    winner" principle). Deliberately reuses _run_generation/
+    generation_store/the SSE progress route UNCHANGED, just twice with two
+    run_ids -- both already support N concurrent runs, and
+    _ai_generation_result.html is already designed to render safely more
+    than once on one page (see its own module comment)."""
+    report = _active_report(request, db, user)
+    run_ids = []
+    for provider_model in (provider_model_a, provider_model_b):
+        provider, _, model = provider_model.partition(":")
+        provider, model = (provider or None), (model or None)
+        run_id = generation_store.create_run()
+        thread = threading.Thread(
+            target=_run_generation, args=(run_id, str(report.id), provider, model, include_income), daemon=True,
+        )
+        thread.start()
+        run_ids.append(run_id)
+    generation_store.cleanup_old()
+    return templates.TemplateResponse(
+        request, "comparables/_ai_compare_progress.html", {"run_id_a": run_ids[0], "run_id_b": run_ids[1]},
+    )
+
+
 @router.get("/ai-generate/progress/{run_id}")
 async def ai_generate_progress_sse(run_id: str) -> StreamingResponse:
     async def event_stream():

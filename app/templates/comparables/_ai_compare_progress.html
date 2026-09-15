@@ -1,0 +1,15 @@
+{# "Сравни модели" (Phase 15 Tier 2, 2026-09-15) -- two independent
+   generations shown unranked, side by side. Each half is the EXACT same
+   self-contained progress block as a single generation
+   (_ai_generation_progress.html), included twice with different run_ids --
+   nothing new to build there, both already support N concurrent runs. #}
+<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:0.75rem">
+  <div style="flex:1;min-width:280px">
+    <div class="hint" style="font-weight:600;margin-bottom:0.3rem">Модел A</div>
+    {% with run_id = run_id_a %}{% include "comparables/_ai_generation_progress.html" %}{% endwith %}
+  </div>
+  <div style="flex:1;min-width:280px">
+    <div class="hint" style="font-weight:600;margin-bottom:0.3rem">Модел B</div>
+    {% with run_id = run_id_b %}{% include "comparables/_ai_generation_progress.html" %}{% endwith %}
+  </div>
+</div>
