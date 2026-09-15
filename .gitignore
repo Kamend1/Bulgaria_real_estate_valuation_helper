@@ -94,3 +94,6 @@ tempCodeRunnerFile.py
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Local scratch artifacts (e.g. HTML copies of published proposals) ───────
+.artifacts/

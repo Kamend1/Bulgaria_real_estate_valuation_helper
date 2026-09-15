@@ -89,7 +89,7 @@ tool: auth/roles, a segment-aware AVM (LightGBM+CatBoost, R2-backed model loadin
 GIS/cadastre integration for Sofia, a full comparables workflow (three value
 approaches + weighted conclusion + structured adjustments), Word/Excel export, and
 AI-assisted valuation via a pgvector + LangChain RAG pipeline (multi-provider:
-OpenAI/Anthropic/Google). **README.md is the up-to-date feature reference** — its
+OpenAI/Anthropic/Google/Mistral). **README.md is the up-to-date feature reference** — its
 Съдържание/table of contents covers every module in detail; don't assume this file's
 older summaries below are exhaustive, treat README.md as authoritative on scope.
 
