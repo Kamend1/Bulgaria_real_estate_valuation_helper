@@ -15,7 +15,7 @@ back -- see tests/conftest.py), so disposable rows need no manual cleanup.
 """
 import uuid
 
-from app.db.models import AppraisalReport, ComparablePool, Listing
+from app.db.models import AppraisalReport, ComparablePool, Listing, User
 from app.services import comparable_service, listing_service
 from app.services.listing_service import SearchFilters
 
@@ -71,12 +71,16 @@ def test_listing_ids_route_flags_capped_result(client, db_session, monkeypatch):
 
 def test_add_to_pool_truncates_oversized_listing_id_list(db_session, monkeypatch):
     monkeypatch.setattr(comparable_service, "MAX_BULK_SELECT_IDS", 2)
+    # Own user, not a hardcoded id: CI starts from an empty database.
+    user = User(email="bulk-cap-test@example.com", username="bulkcaptest", hashed_password="x")
+    db_session.add(user)
+    db_session.flush()
     report = _make_report(db_session)
     listings = [_make_listing(db_session, f"add-cap-{i}") for i in range(5)]
     listing_ids = [listing.id for listing in listings]
 
     inserted = comparable_service.add_to_pool(
-        db_session, listing_ids, "sale", report.id, user_id=1,
+        db_session, listing_ids, "sale", report.id, user_id=user.id,
     )
     assert inserted == 2, "must silently cap even a maliciously/accidentally oversized request"
     pool_count = (
