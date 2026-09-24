@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AppraisalReport, ComparablePool, ReportDocument
 from app.services import documents as documents_service
 from app.services.analytics_service import get_market_trend
+from app.services.listing_service import MAX_BULK_SELECT_IDS
 from app.services.llm.doc_extraction import render_pdf_pages_as_png
 from utils.feature_engineering import PROPERTY_TYPE_DISPLAY
 
@@ -1446,6 +1447,14 @@ def add_to_pool(
 ) -> int:
     if not listing_ids:
         return 0
+    # Defensive cap mirroring listing_service.get_all_listing_ids's own limit
+    # -- that's the normal path listing_ids this large would come through,
+    # but this function has no way to know a caller bypassed it (a hand-built
+    # request, a future caller), and a pool with thousands of rows is both
+    # methodologically meaningless (a comparable set is a small, curated
+    # group, not "everything matching a filter") and a real performance
+    # problem for every later pool render.
+    listing_ids = listing_ids[:MAX_BULK_SELECT_IDS]
     stmt = (
         pg_insert(ComparablePool)
         .values([{

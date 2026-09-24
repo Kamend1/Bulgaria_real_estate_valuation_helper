@@ -84,14 +84,18 @@ def test_build_sampling_kwargs_no_model_falls_back_to_provider_default():
     assert kwargs["presence_penalty"] == 0.5
 
 
-def test_get_sampling_capabilities_has_narrowed_entry_for_gpt56_sol():
+def test_get_sampling_capabilities_has_narrowed_entry_for_gpt6_luna():
+    """Was gpt-5.6-sol until 2026-09-24, when the tier list moved to the gpt-6
+    family (gpt-5.6-* no longer appears in _MODEL_TIERS, and per-model caps
+    entries are only emitted for tier-listed models). The 5.6 prefix logic
+    itself is still covered via build_sampling_kwargs above."""
     caps = providers.get_sampling_capabilities()
-    assert "openai:gpt-5.6-sol" in caps
-    sol_caps = caps["openai:gpt-5.6-sol"]
-    assert sol_caps["top_p"]["supported"] is False
-    assert sol_caps["presence_penalty"]["supported"] is False
-    assert sol_caps["frequency_penalty"]["supported"] is False
-    assert sol_caps["seed"]["supported"] is True   # NOT disabled for this family, unlike gpt-5.4-pro
+    assert "openai:gpt-6-luna" in caps
+    luna_caps = caps["openai:gpt-6-luna"]
+    assert luna_caps["top_p"]["supported"] is True    # NEW vs gpt-5.6, which rejected it
+    assert luna_caps["presence_penalty"]["supported"] is False
+    assert luna_caps["frequency_penalty"]["supported"] is False
+    assert luna_caps["seed"]["supported"] is True   # NOT disabled for this family, unlike gpt-5.4-pro
 
 
 def test_get_sampling_capabilities_does_not_narrow_unrelated_openai_models():

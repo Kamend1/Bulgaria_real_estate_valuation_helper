@@ -21,9 +21,15 @@
       // token a different way — see the hx-headers attribute on <body>
       // below, which htmx applies to every request it fires regardless of
       // when the form entered the DOM (covers content swapped in later too,
-      // which a load-time-only script here would miss).
+      // which a load-time-only script here would miss). That means any
+      // form carrying hx-post/hx-get/hx-put/hx-patch/hx-delete already gets
+      // the token via that header and never needs this hidden field --
+      // skipping them isn't just tidy, it matters: a page with a few
+      // thousand small per-row htmx forms (a large comparable pool, say)
+      // was measurably slow at load specifically from this loop doing a
+      // querySelector + DOM write on every single one of them for nothing.
       var csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-      document.querySelectorAll('form').forEach(function (form) {
+      document.querySelectorAll('form:not([hx-post]):not([hx-get]):not([hx-put]):not([hx-patch]):not([hx-delete])').forEach(function (form) {
         if (!form.querySelector('input[name="csrf_token"]')) {
           var input = document.createElement('input');
           input.type = 'hidden';

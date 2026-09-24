@@ -28,7 +28,7 @@ from app.db.models import LegalDocumentChunk, MarketDocument
 from app.services.llm.doc_extraction import extract_native_text, ocr_via_vision
 from app.services.llm.embeddings import get_embeddings_model, resolve_embedding_model
 from app.services.llm.legal_chunking import split_legal_text
-from app.services.llm.providers import get_chat_model
+from app.services.llm.providers import get_chat_model, structured_output
 
 DOCUMENT_TYPE_LABELS = {
     "market_report": "Пазарен анализ / доклад",
@@ -88,7 +88,7 @@ def _extract_structured_facts(text: str, document_type: str, provider: str | Non
     # headroom; the explicit "up to ~12" caps below keep the model from
     # just filling whatever budget it's given on an unusually dense report.
     chat = get_chat_model(provider, model, max_tokens=4000)
-    structured = chat.with_structured_output(MarketDocumentFacts)
+    structured = structured_output(chat, MarketDocumentFacts)
     system = (
         f"Извлечи фактите от този документ ({label}), релевантен за пазара на недвижими имоти "
         "в България. Ползвай само това, което реално пише в текста -- не допълвай и не "
@@ -106,7 +106,7 @@ def _extract_legal_metadata(text: str, provider: str | None, model: str | None) 
     LLM, from the document's opening -- the actual legal content is stored
     verbatim by the caller, never paraphrased through this call."""
     chat = get_chat_model(provider, model, max_tokens=500)
-    structured = chat.with_structured_output(LegalDocumentFacts)
+    structured = structured_output(chat, LegalDocumentFacts)
     system = (
         "Извлечи само идентифициращите метаданни на този нормативен/правен документ "
         "(заглавие, издаващ орган, дата, едноизреченско описание на обхвата). Не преразказвай "

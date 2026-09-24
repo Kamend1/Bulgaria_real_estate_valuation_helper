@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AppraisalReport
 from app.services import avm_service
 from app.services.comparable_service import get_pool_with_stats
-from app.services.llm.providers import get_chat_model, resolve_chat_model
+from app.services.llm.providers import get_chat_model, resolve_chat_model, structured_output
 
 
 class CritiqueResult(BaseModel):
@@ -106,7 +106,7 @@ def _critique_node(provider: str | None, model: str | None, call_log: list[dict]
         # alongside the parsed Pydantic result -- with_structured_output()
         # discards the raw message by default, which would silently lose
         # this call from the token/cost ledger (Tier 1).
-        structured = chat.with_structured_output(CritiqueResult, include_raw=True)
+        structured = structured_output(chat, CritiqueResult, include_raw=True)
         result = structured.invoke([
             SystemMessage(content=_CRITIC_SYSTEM_PROMPT),
             HumanMessage(content=json.dumps(state["context"], default=str, ensure_ascii=False)),
@@ -187,7 +187,7 @@ def run_cross_check(
     call_log: list[dict] = []
     context = _gather_context_node(db, report)({"report_id": str(report.id), "context": {}, "critique": {}})["context"]
     chat = get_chat_model(provider, model, max_tokens=300)
-    structured = chat.with_structured_output(CrossCheckResult, include_raw=True)
+    structured = structured_output(chat, CrossCheckResult, include_raw=True)
     result = structured.invoke([
         SystemMessage(content=_CROSS_CHECK_SYSTEM_PROMPT),
         HumanMessage(content=json.dumps({"claim": claim_text, "report_context": context}, default=str, ensure_ascii=False)),

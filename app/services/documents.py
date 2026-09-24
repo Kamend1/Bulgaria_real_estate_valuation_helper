@@ -49,7 +49,7 @@ from app.services.llm.doc_extraction import (
     ocr_via_vision as _ocr_via_vision,
     render_pdf_pages_as_png as _render_pdf_pages_as_png,
 )
-from app.services.llm.providers import get_chat_model
+from app.services.llm.providers import get_chat_model, structured_output
 
 # Bulgarian appraisal practice: covered/uncovered terraces and balconies
 # count at a reduced percentage toward assessed/usable area, not their full
@@ -211,7 +211,7 @@ def _extract_structured_facts(text: str, document_type: str, provider: str | Non
     # extractable this way, never a KeyError.
     schema = _SCHEMAS.get(document_type, GeneralDocumentFacts)
     chat = get_chat_model(provider, model, max_tokens=1500)
-    structured = chat.with_structured_output(schema)
+    structured = structured_output(chat, schema)
     system = _EXTRACTION_SYSTEM_PROMPTS.get(document_type) or _generic_extraction_prompt(document_type)
     result = structured.invoke([SystemMessage(content=system), HumanMessage(content=text[:20000])])
     return result.model_dump()
@@ -295,7 +295,7 @@ def _vision_structured_extract_sketch(file_path: Path, report: AppraisalReport |
         page_images = [file_path.read_bytes()]
 
     chat = get_chat_model(provider, model, max_tokens=1800)
-    structured = chat.with_structured_output(SketchFacts)
+    structured = structured_output(chat, SketchFacts)
 
     declared = "Няма декларирани данни за имота за сравнение."
     if report is not None and (report.subject_property_type or report.subject_area_sqm):

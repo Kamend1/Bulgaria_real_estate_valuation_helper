@@ -30,12 +30,13 @@ from app.config import settings
 _MISTRAL_EU_ENDPOINT = "https://api.eu.mistral.ai/v1"
 
 _DEFAULT_MODELS = {
-    # Upgraded 2026-09-15: OpenAI's gpt-5.4-*/-pro trio was superseded by the
-    # gpt-5.6 Luna/Terra/Sol family (a durable capability-tier naming scheme
-    # per OpenAI, independent of the generation number) -- confirmed live
-    # against this account's actual API access (client.models.list() +
-    # a real ChatOpenAI.invoke() per model), not assumed from the name.
-    "openai": "gpt-5.6-luna",
+    # Upgraded 2026-09-24: gpt-5.6 Luna/Terra/Sol -> the gpt-6 Luna/Sol/Astra
+    # family (Luna stays the cheap default; earlier 2026-09-15 the gpt-5.4-*/
+    # -pro trio was superseded by the gpt-5.6 family the same way) --
+    # confirmed live against this account's actual API access
+    # (client.models.list() + a real ChatOpenAI.invoke() per model), not
+    # assumed from the name.
+    "openai": "gpt-6-luna",
     # Haiku 4.5 chosen deliberately over Anthropic's own stated default
     # (Opus 5) to match the cost tier of the other providers' defaults here
     # -- this whole phase is cost-sensitive by design (see plan doc); the
@@ -50,16 +51,23 @@ _DEFAULT_MODELS = {
 # _DEFAULT_MODELS[provider] above. Lets the UI offer a model choice per
 # provider, not just a provider choice.
 #
-# openai (2026-09-15): Luna/Terra/Sol replace gpt-5.4-mini/gpt-5.4/gpt-5.4-pro
-# -- verified live via client.models.list() against this account, then a
-# real ChatOpenAI.invoke() per model to confirm each actually works (not
-# just listed). Tier order (cheap/mid/premium = Luna/Terra/Sol) and pricing
-# cross-checked against 2 independent trackers that agreed exactly
-# (eesel.ai, vellum.ai, both dated post the 2026-07-30 price cut) -- see
-# _PRICING_PER_1M_USD. Capability profile differs from both the old gpt-5.4
-# trio AND from gpt-5.4-pro's Responses-API routing -- see
-# _RESPONSES_API_ONLY_OPENAI_PREFIXES/_sampling_support below, verified with
-# real invoke() calls per param (temperature works, top_p/frequency_penalty/
+# openai (2026-09-24): gpt-6-luna/sol/astra replace gpt-5.6-luna/terra/sol --
+# verified live via client.models.list() against this account, then real
+# ChatOpenAI.invoke() calls per model AND per sampling parameter (not just
+# "listed"). Tier order is by verified price (OpenAI's own pricing page,
+# developers.openai.com/api/docs/pricing, fetched 2026-09-24): Luna
+# $0.10/$0.50 < Sol $2/$10 < Astra $10/$50 (the flagship).
+# The three models have three DIFFERENT capability profiles (see
+# _OPENAI_MODEL_OVERRIDES / _RESPONSES_API_REQUIRED_OPENAI_PREFIXES below):
+# Luna/Sol need reasoning_effort="none" for tools on Chat Completions (as
+# gpt-5.6 did); Astra cannot use tools on Chat Completions at all and must
+# go through the Responses API, where it also rejects temperature/top_p.
+#
+# openai (2026-09-15, superseded above): Luna/Terra/Sol replaced
+# gpt-5.4-mini/gpt-5.4/gpt-5.4-pro -- Capability profile differed from both
+# the old gpt-5.4 trio AND from gpt-5.4-pro's Responses-API routing -- see
+# _sampling_support below, verified with real invoke() calls per param
+# (temperature works, top_p/frequency_penalty/
 # presence_penalty all return a 400 "Unsupported parameter", seed works).
 #
 # google_genai (2026-09-15): mid tier bumped gemini-3.5-flash -> gemini-3.8-
@@ -75,13 +83,20 @@ _DEFAULT_MODELS = {
 # tracking Google's own forward-compatible pointer.
 _MODEL_TIERS = {
     "openai": [
-        ("gpt-5.6-luna", "евтин"),
-        ("gpt-5.6-terra", "среден"),
-        ("gpt-5.6-sol", "premium"),
+        ("gpt-6-luna", "евтин"),
+        ("gpt-6-sol", "среден"),
+        ("gpt-6-astra", "premium"),
     ],
+    # anthropic (2026-09-24): mid tier claude-sonnet-5 -> claude-opus-5-5
+    # (verified live: listed by client.models.list(), real invoke() + tool
+    # call OK). Opus 5.5 ($4/$20) is CHEAPER than Opus 5 ($5/$25) and newer,
+    # so the premium slot (claude-opus-5) is now an older, dearer model than
+    # the middle one -- the price ordering still holds (4 < 5), but capability
+    # ordering probably doesn't; claude-fable-5-1 ($10/$50, same API profile)
+    # is the natural premium candidate if that ever gets revisited.
     "anthropic": [
         ("claude-haiku-4-5", "евтин"),
-        ("claude-sonnet-5", "среден"),
+        ("claude-opus-5-5", "среден"),
         ("claude-opus-5", "premium"),
     ],
     "google_genai": [
@@ -112,7 +127,18 @@ _MODEL_TIERS = {
 # USD per 1M tokens (input, output). Confidence varies by source -- treat
 # estimated_cost_usd in ai_valuation_runs as an estimate, not a
 # billing-accurate figure, regardless of source:
-#   - claude-* rates: bundled claude-api skill's own authoritative table.
+#   - claude-* rates: Anthropic's own pricing page
+#     (platform.claude.com/docs/en/about-claude/pricing), fetched
+#     2026-09-24 -- HIGH confidence. Two corrections vs. the earlier table:
+#     claude-sonnet-5 is $2/$10 (the launch price was announced as
+#     introductory through 2026-08-31; the page states the scheduled rise to
+#     $3/$15 will NOT happen), and claude-opus-5-5 is new at $4/$20.
+#   - gpt-6-luna/sol/astra and gpt-5.6-luna/terra/sol: OpenAI's own pricing
+#     page (developers.openai.com/api/docs/pricing), fetched 2026-09-24 --
+#     HIGH confidence; supersedes the tracker-based figures below for the
+#     gpt-5.6 family (gpt-5.6-sol was $5/$30 there, now listed $4/$20).
+#     Not modeled: OpenAI's 2x long-context surcharge on very large prompts,
+#     so estimated_cost_usd is a lower bound for those calls.
 #   - gemini-3.5-flash-lite, gemini-3.8-flash: Google's own docs
 #     (ai.google.dev/gemini-api/docs/pricing) -- HIGH confidence.
 #     gemini-3.5-flash-lite's rate corrected 2026-09-15 ($0.25/$1.50 ->
@@ -121,10 +147,6 @@ _MODEL_TIERS = {
 #     model additions. gemini-3.8-flash's $0.75/$3.75 is an introductory
 #     rate through 2026-12-31; official docs state it rises to $1.50/$7.50
 #     on 2027-01-01 -- revisit this entry after that date.
-#   - gpt-5.6-luna/terra/sol: two independent trackers (eesel.ai, vellum.ai)
-#     agreed exactly on the post-2026-07-30-price-cut rates -- HIGH
-#     confidence (OpenAI's own pricing page blocks direct fetch in this
-#     environment, as before).
 #   - mistral-small-2603/large-2512/medium-2604: Mistral's own official
 #     pricing page (mistral.ai/pricing/api), fetched 2026-09-15 -- HIGH
 #     confidence. Note the non-obvious ordering: Large is cheaper than
@@ -138,14 +160,18 @@ _MODEL_TIERS = {
 # None for it, shown as "-" in the UI rather than a wrong number.
 # Update this table if a provider reprices.
 _PRICING_PER_1M_USD = {
+    "gpt-6-luna": (0.10, 0.50),
+    "gpt-6-sol": (2.00, 10.00),
+    "gpt-6-astra": (10.00, 50.00),
     "gpt-5.6-luna": (0.20, 1.20),
     "gpt-5.6-terra": (2.00, 12.00),
-    "gpt-5.6-sol": (5.00, 30.00),
+    "gpt-5.6-sol": (4.00, 20.00),
     "gpt-5.4-mini": (0.75, 4.50),
     "gpt-5.4": (2.50, 15.00),
     "gpt-5.4-pro": (15.00, 90.00),
     "claude-haiku-4-5": (1.00, 5.00),
-    "claude-sonnet-5": (3.00, 15.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
     "claude-opus-5": (5.00, 25.00),
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.5-flash": (1.50, 9.00),
@@ -277,9 +303,20 @@ def is_length_truncated(response) -> bool:
     ceiling rather than reaching a natural stop. Call this on the final
     step of a tool-calling loop (the one with no further tool_calls) --
     that's the only place a truncated answer could be silently mistaken
-    for a finished one."""
+    for a finished one.
+
+    OpenAI's Responses API (what gpt-6-astra runs on, and what langchain-
+    openai silently picks for the "-pro" ids) reports this differently from
+    Chat Completions: response_metadata carries status="incomplete" +
+    incomplete_details={"reason": "max_output_tokens"} and NO finish_reason
+    at all -- verified live 2026-09-24 with a max_tokens=30 gpt-6-astra call,
+    where all 30 tokens went to hidden reasoning and no visible text was
+    produced, yet the Chat-Completions-only check above returned False."""
     meta = getattr(response, "response_metadata", None) or {}
-    return meta.get("finish_reason") in _TRUNCATION_SIGNALS or meta.get("stop_reason") in _TRUNCATION_SIGNALS
+    if meta.get("finish_reason") in _TRUNCATION_SIGNALS or meta.get("stop_reason") in _TRUNCATION_SIGNALS:
+        return True
+    details = meta.get("incomplete_details") or {}
+    return meta.get("status") == "incomplete" and details.get("reason") == "max_output_tokens"
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int, provider: str | None = None) -> float | None:
@@ -374,28 +411,83 @@ _SAMPLING_SUPPORT = {
 #     `OpenAIInvalidRequestError` "Unsupported parameter", not a raw
 #     TypeError). top_p/frequency_penalty/presence_penalty all return that
 #     400; temperature and seed both work fine.
+#   - gpt-6-luna (2026-09-24): verified live per parameter, same method. Stays
+#     on Chat Completions with reasoning_effort="none". temperature/top_p/
+#     seed work (top_p is NEW vs. gpt-5.6, which rejected it);
+#     frequency_penalty/presence_penalty both fail with an HTTP 500
+#     "server_error" after ~80s, reproducibly (2 of 2 tries on frequency) --
+#     not the clean 400 the 5.6 family gave, but just as unusable.
+#   - gpt-6-sol (2026-09-24): everything works (temperature, top_p, both
+#     penalties, seed) on Chat Completions with reasoning_effort="none" -- no
+#     override needed, it matches the plain provider default.
+#   - gpt-6-astra (2026-09-24): rejects ALL sampling params. On the Responses
+#     API (the only place it can use tools -- see
+#     _RESPONSES_API_REQUIRED_OPENAI_PREFIXES) temperature and top_p return a
+#     400 "Unsupported parameter ... not supported with this model", and
+#     seed/frequency_penalty/presence_penalty don't exist on
+#     Responses.create() at all (a raw TypeError from the openai SDK).
 _OPENAI_MODEL_OVERRIDES: list[tuple[tuple[str, ...], dict]] = [
     (("gpt-5-pro", "gpt-5.2-pro", "gpt-5.4-pro", "gpt-5.5-pro"),
      {"frequency_penalty": False, "presence_penalty": False, "seed": False}),
     (("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"),
      {"top_p": False, "frequency_penalty": False, "presence_penalty": False}),
+    (("gpt-6-luna",),
+     {"frequency_penalty": False, "presence_penalty": False}),
+    (("gpt-6-astra",),
+     {"temperature": False, "top_p": False, "frequency_penalty": False,
+      "presence_penalty": False, "seed": False}),
 ]
 
-# gpt-5.6-luna/terra/sol reject ANY tool-bound Chat Completions request
+# Claude 5-generation models (2026-09-24, verified live with real requests on
+# claude-sonnet-5, claude-opus-5, claude-opus-5-5 and claude-fable-5-1 --
+# all four identical): the Messages API rejects temperature (any value other
+# than exactly 1.0, the default), top_p and top_k with a 400 "`<param>` is
+# deprecated for this model". claude-haiku-4-5 is unaffected and keeps the
+# provider-level profile below (temperature 0-1, top_k, top_p but never
+# together with temperature). Prefix match, so claude-opus-5-5 and
+# claude-fable-5-1 are covered by the "claude-opus-5"/"claude-fable-5"
+# entries. Latent before this: the chat UI's sliders always carry a value,
+# so moving temperature off 1.0 on Sonnet/Opus 5 was a guaranteed 400.
+_ANTHROPIC_MODEL_OVERRIDES: list[tuple[tuple[str, ...], dict]] = [
+    (("claude-sonnet-5", "claude-opus-5", "claude-fable-5"),
+     {"temperature": False, "top_p": False, "top_k": False}),
+]
+
+_MODEL_OVERRIDES_BY_PROVIDER = {
+    "openai": _OPENAI_MODEL_OVERRIDES,
+    "anthropic": _ANTHROPIC_MODEL_OVERRIDES,
+}
+
+# gpt-5.6-* and gpt-6-luna/sol reject ANY tool-bound Chat Completions request
 # outright unless reasoning_effort is explicitly "none" -- see the real
 # incident + full reasoning documented at get_chat_model()'s openai branch,
 # where this constant is actually used.
-_REASONING_EFFORT_CONFLICTS_WITH_TOOLS_PREFIXES = ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol")
+_REASONING_EFFORT_CONFLICTS_WITH_TOOLS_PREFIXES = (
+    "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol",
+)
+
+# gpt-6-astra can't use function tools on Chat Completions at all: it does
+# not support reasoning_effort="none" (only low/medium/high/xhigh), and
+# Chat Completions rejects tools alongside any other effort ("Function tools
+# with reasoning_effort are not supported ... use /v1/responses or set
+# reasoning_effort to 'none'") -- verified live 2026-09-24. Every specialist
+# in this app binds tools, so the Responses API (langchain-openai's
+# use_responses_api=True) is the only viable route; tool calls, default and
+# low reasoning effort all confirmed working there.
+_RESPONSES_API_REQUIRED_OPENAI_PREFIXES = ("gpt-6-astra",)
 
 
 def _sampling_support(provider: str, model: str | None) -> dict:
-    """Like _SAMPLING_SUPPORT[provider] plus an implicit top_p=True, but
-    narrowed for the specific model when its actual API surface differs
-    from the rest of its provider's models (see _OPENAI_MODEL_OVERRIDES
-    above)."""
-    support = {"top_p": True, **_SAMPLING_SUPPORT.get(provider, _SAMPLING_SUPPORT["openai"])}
-    if provider == "openai" and model:
-        for prefixes, override in _OPENAI_MODEL_OVERRIDES:
+    """Like _SAMPLING_SUPPORT[provider] plus an implicit top_p=True and
+    temperature=True, but narrowed for the specific model when its actual
+    API surface differs from the rest of its provider's models (see
+    _OPENAI_MODEL_OVERRIDES / _ANTHROPIC_MODEL_OVERRIDES above)."""
+    support = {
+        "temperature": True, "top_p": True,
+        **_SAMPLING_SUPPORT.get(provider, _SAMPLING_SUPPORT["openai"]),
+    }
+    if model:
+        for prefixes, override in _MODEL_OVERRIDES_BY_PROVIDER.get(provider, []):
             if model.startswith(prefixes):
                 support.update(override)
                 break
@@ -419,7 +511,7 @@ def get_sampling_capabilities() -> dict:
         support = _sampling_support(provider, None)
         temp_min, temp_max = _TEMPERATURE_RANGE[provider]
         caps[provider] = {
-            "temperature": {"min": temp_min, "max": temp_max},
+            "temperature": {"supported": support["temperature"], "min": temp_min, "max": temp_max},
             "top_p": {"supported": support["top_p"], "min": 0.0, "max": 1.0},
             "top_k": {"supported": support["top_k"], "min": 1, "max": 500},
             "frequency_penalty": {"supported": support["frequency_penalty"], "min": -2.0, "max": 2.0},
@@ -434,7 +526,7 @@ def get_sampling_capabilities() -> dict:
             if support == _sampling_support(provider, None):
                 continue  # no override needed, the provider-level entry already matches
             caps[f"{provider}:{model_id}"] = {
-                "temperature": {"min": temp_min, "max": temp_max},
+                "temperature": {"supported": support["temperature"], "min": temp_min, "max": temp_max},
                 "top_p": {"supported": support["top_p"], "min": 0.0, "max": 1.0},
                 "top_k": {"supported": support["top_k"], "min": 1, "max": 500},
                 "frequency_penalty": {"supported": support["frequency_penalty"], "min": -2.0, "max": 2.0},
@@ -476,9 +568,11 @@ def build_sampling_kwargs(
     support = _sampling_support(provider, model)
     temp_min, temp_max = _TEMPERATURE_RANGE.get(provider, (0.0, 2.0))
     kwargs: dict = {}
-    if temperature is not None:
+    if temperature is not None and support["temperature"]:
         kwargs["temperature"] = max(temp_min, min(temp_max, temperature))
-    if top_p is not None and support["top_p"] and not (provider == "anthropic" and temperature is not None):
+    if top_p is not None and support["top_p"] and not (
+        provider == "anthropic" and temperature is not None and support["temperature"]
+    ):
         kwargs["top_p"] = max(0.0, min(1.0, top_p))
     if top_k is not None and support["top_k"]:
         kwargs["top_k"] = max(1, int(top_k))
@@ -489,6 +583,32 @@ def build_sampling_kwargs(
     if seed is not None and support["seed"]:
         kwargs["seed"] = int(seed)
     return kwargs
+
+
+# claude-opus-5-5 rejects any forced tool_choice ("tool_choice: type "tool"
+# and "any" are not supported for this model" -- verified live 2026-09-24),
+# and langchain-anthropic's default structured-output method
+# ("function_calling") works by forcing exactly that. Left as-is it breaks
+# every structured call in this app on that model: the orchestrator's
+# supervisor routing, the critic/cross-check, and document extraction.
+# Anthropic's native json_schema mode has no such requirement and was
+# confirmed working on it for RouteDecision/CritiqueResult/CrossCheckResult.
+# Deliberately scoped to the one model known to need it (claude-haiku-4-5
+# and claude-opus-5 still handle forced tool choice fine).
+_NO_FORCED_TOOL_CHOICE_PREFIXES = ("claude-opus-5-5",)
+
+
+def structured_output(chat: BaseChatModel, schema, **kwargs):
+    """`chat.with_structured_output(schema, **kwargs)`, but switches models
+    that can't be forced to call a tool onto Anthropic's native json_schema
+    mode (see _NO_FORCED_TOOL_CHOICE_PREFIXES). Every structured-output call
+    site goes through here instead of calling with_structured_output()
+    directly, so the next model with a quirk like this is a one-line change.
+    An explicit `method=` from the caller always wins."""
+    model_id = getattr(chat, "model", None) or getattr(chat, "model_name", None) or ""
+    if isinstance(model_id, str) and model_id.startswith(_NO_FORCED_TOOL_CHOICE_PREFIXES):
+        kwargs.setdefault("method", "json_schema")
+    return chat.with_structured_output(schema, **kwargs)
 
 
 def get_chat_model(
@@ -541,6 +661,19 @@ def get_chat_model(
             # this default costs nothing in practice; pass reasoning_effort/
             # reasoning explicitly to override for a genuinely tool-free call.
             kwargs["reasoning_effort"] = "none"
+        if (
+            model
+            and model.startswith(_RESPONSES_API_REQUIRED_OPENAI_PREFIXES)
+            and "use_responses_api" not in kwargs
+        ):
+            # gpt-6-astra: see _RESPONSES_API_REQUIRED_OPENAI_PREFIXES. Left
+            # at the model's own default reasoning effort -- "none" isn't
+            # even accepted here, and hidden reasoning tokens count against
+            # the same max_tokens cap as the visible answer (verified: a
+            # max_tokens=30 call spent all 30 on reasoning and returned no
+            # text), which is why is_length_truncated() also understands the
+            # Responses API's "incomplete" status.
+            kwargs["use_responses_api"] = True
         return ChatOpenAI(model=model, api_key=settings.openai_api_key, **kwargs)
 
     if provider == "anthropic":

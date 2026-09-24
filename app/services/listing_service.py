@@ -40,6 +40,22 @@ _SORT_SQL = {
 
 RESULTS_PER_PAGE = 50
 
+# "Select all matching pages" (get_all_listing_ids / /listings/ids) used to
+# claim "(max 5000)" in its docstring but never actually enforced any LIMIT
+# in the SQL -- a broad filter (e.g. all Sofia apartments for sale) could
+# return the entire matching set (found live, 2026-09-17: 8,715 ids in one
+# response) straight into a single <form> submission to /comparables/add.
+# Nothing in the request pipeline actually rejects that many form fields
+# (Starlette's own field-count cap only applies to multipart bodies, not
+# the plain urlencoded POST a checkbox form sends -- verified directly
+# against starlette.formparsers), so it silently succeeds and produces a
+# comparable_pool with thousands of rows: real methodological nonsense (a
+# comparable set is a handful of genuinely similar properties, not "every
+# listing matching a broad filter") and a genuine performance problem, since
+# every pool render/htmx swap then walks all of them. Capped here, at the
+# actual source of the list, rather than only downstream.
+MAX_BULK_SELECT_IDS = 300
+
 
 @dataclass
 class SearchFilters:
@@ -258,8 +274,11 @@ def get_property_types_for_filter(db: Session) -> list[tuple[str, str, int]]:
     return [(r[0], r[1] or r[0], int(r[2])) for r in rows]
 
 
-def get_all_listing_ids(db: Session, filters: SearchFilters) -> list[int]:
-    """Returns all matching listing IDs for the given filters (used for select-all)."""
+def get_all_listing_ids(db: Session, filters: SearchFilters) -> tuple[list[int], int]:
+    """Returns (up to MAX_BULK_SELECT_IDS matching listing ids, true total match count),
+    for select-all. The total is reported separately so the caller can tell the user
+    when their filter matched more than the cap, instead of silently handing back a
+    truncated list with no explanation."""
     conditions = [
         "l.total_price IS NOT NULL",
         "l.price_per_sqm_model IS NOT NULL",
@@ -314,11 +333,15 @@ def get_all_listing_ids(db: Session, filters: SearchFilters) -> list[int]:
         params["max_floor"] = filters.max_floor
 
     where_sql = " AND ".join(conditions)
-    rows = db.execute(
-        text(f"SELECT l.id FROM listings l WHERE {where_sql}"),
+    total = db.execute(
+        text(f"SELECT count(*) FROM listings l WHERE {where_sql}"),
         params,
+    ).scalar_one()
+    rows = db.execute(
+        text(f"SELECT l.id FROM listings l WHERE {where_sql} ORDER BY l.id LIMIT :limit"),
+        {**params, "limit": MAX_BULK_SELECT_IDS},
     ).fetchall()
-    return [r[0] for r in rows]
+    return [r[0] for r in rows], int(total)
 
 
 def get_listing_detail(db: Session, listing_id: int) -> dict[str, Any] | None:

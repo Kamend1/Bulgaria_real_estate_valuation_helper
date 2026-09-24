@@ -46,7 +46,9 @@ from app.services.comparable_service import get_pool_with_stats
 from app.services.llm import critic_graph
 from app.services.llm.analyst_tools import build_analyst_tools
 from app.services.llm.embeddings import get_embeddings_model, resolve_embedding_model
-from app.services.llm.providers import get_chat_model, is_length_truncated, list_configured_providers, resolve_chat_model
+from app.services.llm.providers import (
+    get_chat_model, is_length_truncated, list_configured_providers, resolve_chat_model, structured_output,
+)
 from app.services.llm.tools import (
     _income_valuation_description,
     _income_valuation_fn,
@@ -315,7 +317,7 @@ def _supervisor_node_fn(
                 "достатъчно, избери 'done' или друг, still-неотговорил специалист."
             )
         chat = get_chat_model(provider, model_id, max_tokens=400)
-        structured = chat.with_structured_output(RouteDecision, include_raw=True)
+        structured = structured_output(chat, RouteDecision, include_raw=True)
         result = structured.invoke([SystemMessage(content=prompt), *state["messages"]])
         raw_msg = result.get("raw")
         usage = (getattr(raw_msg, "usage_metadata", None) or {}) if raw_msg is not None else {}

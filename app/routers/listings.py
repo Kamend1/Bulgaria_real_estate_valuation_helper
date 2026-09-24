@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.templating import templates
 from app.services.listing_service import (
     GEO_CATEGORIES,
+    MAX_BULK_SELECT_IDS,
     RESULTS_PER_PAGE,
     SORT_OPTIONS,
     SearchFilters,
@@ -94,6 +95,7 @@ async def listings_page(
             "sort_options": SORT_OPTIONS,
             "property_types": property_types,
             "cities": cities,
+            "max_bulk_select_ids": MAX_BULK_SELECT_IDS,
         },
     )
 
@@ -126,10 +128,13 @@ async def listing_ids(
     filters: SearchFilters = Depends(_parse_filters),
     db: Session = Depends(get_db),
 ):
-    """Returns all listing IDs matching current filters (max 5000), for select-all."""
+    """Returns up to MAX_BULK_SELECT_IDS matching listing ids, for select-all.
+    `total` is the TRUE match count (not len(ids)) so the client can tell the
+    user their filter matched more than got selected, instead of silently
+    acting as if the filter only matched `len(ids)` listings."""
     from app.services.listing_service import get_all_listing_ids
-    ids = get_all_listing_ids(db, filters)
-    return {"ids": ids, "total": len(ids)}
+    ids, total = get_all_listing_ids(db, filters)
+    return {"ids": ids, "total": total, "capped": total > len(ids)}
 
 
 @router.get("/quarters", response_class=HTMLResponse)

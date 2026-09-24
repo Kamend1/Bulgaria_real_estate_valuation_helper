@@ -108,9 +108,19 @@ async def csrf_protect(request: Request, call_next):
             except Exception:
                 submitted = None
         if not verify_csrf_token(request, submitted):
-            message = "Невалидна или изтекла сесийна заявка. Презаредете страницата и опитайте отново."
             if request.headers.get("HX-Request"):
-                return HTMLResponse(message, status_code=403)
+                # The stale token is baked into the page's own DOM (a form
+                # field, or the hx-headers value on <body> at the time this
+                # page was first loaded) -- telling the user to reload it
+                # themselves and then doing nothing about it left them
+                # staring at a swapped-in error fragment. HX-Refresh makes
+                # htmx do a real full-page reload instead (ignoring the
+                # response body/status entirely), which always picks up a
+                # fresh token and the live session state either way.
+                return HTMLResponse(
+                    "Сесията се презарежда...", status_code=200, headers={"HX-Refresh": "true"},
+                )
+            message = "Невалидна или изтекла сесийна заявка. Презаредете страницата и опитайте отново."
             return HTMLResponse(
                 f"<h2>403 — Невалидна заявка (CSRF)</h2><p>{message}</p><p><a href='/'>Начало</a></p>",
                 status_code=403,

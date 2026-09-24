@@ -166,6 +166,11 @@
 </div>
 
 <script>
+// Mirrors app/services/listing_service.py::MAX_BULK_SELECT_IDS -- the
+// server enforces this regardless, this is just so the button's label
+// doesn't promise more than the server will actually select.
+const MAX_BULK_SELECT_IDS = {{ max_bulk_select_ids }};
+
 // Filter city checkbox panel client-side
 function filterPanel(input) {
   const term = input.value.toLowerCase();
@@ -232,7 +237,18 @@ function selectAllPages() {
         form.appendChild(inp);
       });
       updateActionBar();
-      btn.style.display = 'none';
+      if (data.capped) {
+        // The server capped the selection (MAX_BULK_SELECT_IDS,
+        // app/services/listing_service.py) -- a comparable pool is meant to
+        // stay a small, curated set, not "everything matching a broad
+        // filter." Say so explicitly instead of silently handing over fewer
+        // items than the button promised.
+        btn.textContent = 'Избрани ' + _allIdsLoaded.length + ' от ' + data.total.toLocaleString('bg')
+          + ' — прецизирайте филтъра за по-фокусиран пул';
+        btn.disabled = true;
+      } else {
+        btn.style.display = 'none';
+      }
     })
     .catch(() => {
       btn.textContent = 'Грешка — опитай пак';
@@ -264,7 +280,13 @@ function updateActionBar() {
   if (allPageBtn && master && master.checked && total > pageSize && injected === 0) {
     allPageBtn.style.display = '';
     allPageBtn.disabled = false;
-    allPageBtn.textContent = 'Избери всички ' + total.toLocaleString('bg') + ' от всички страници';
+    // Server caps the actual selection at MAX_BULK_SELECT_IDS -- don't
+    // promise "all N" up front for a big total; the button's own fetch
+    // handler (selectAllPages) corrects the label once it knows whether
+    // the server had to cap it.
+    allPageBtn.textContent = total > MAX_BULK_SELECT_IDS
+      ? 'Избери до ' + MAX_BULK_SELECT_IDS + ' от ' + total.toLocaleString('bg')
+      : 'Избери всички ' + total.toLocaleString('bg') + ' от всички страници';
   } else if (allPageBtn && injected === 0) {
     allPageBtn.style.display = 'none';
   }

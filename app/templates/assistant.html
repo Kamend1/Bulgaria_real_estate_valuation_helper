@@ -89,7 +89,7 @@
       <div class="param-cell" data-param="temperature">
         <label>Температура <span class="param-val" id="param-temperature-val">1.0</span></label>
         <input type="range" id="param-temperature" min="0" max="2" step="0.1" value="1.0">
-        <p class="hint param-hint">Случайност на отговора. По-ниско (0.0–0.4) → предвидим, консистентен текст, добър за факти. По-високо (0.8–2.0) → по-разнообразен, по-„творчески“ текст, по-голям риск от отклонение. Диапазонът зависи от модела (Anthropic спира на 1.0).</p>
+        <p class="hint param-hint">Случайност на отговора. По-ниско (0.0–0.4) → предвидим, консистентен текст, добър за факти. По-високо (0.8–2.0) → по-разнообразен, по-„творчески“ текст, по-голям риск от отклонение. Диапазонът зависи от модела (Anthropic спира на 1.0). Не се приема от Claude 5-то поколение (Sonnet/Opus/Fable 5) и GPT-6 Astra — контролът се сивее автоматично.</p>
       </div>
       <div class="param-cell" data-param="top_p">
         <label>Top-p <span class="param-val" id="param-top_p-val">1.0</span></label>
@@ -195,7 +195,7 @@
   // caps at 1.0, others at 2.0).
   function applyCapabilities() {
     var provider = currentProvider();
-    // A specific model (e.g. "openai:gpt-5.6-sol") can have narrower support
+    // A specific model (e.g. "openai:gpt-6-astra") can have narrower support
     // than the rest of its provider -- see providers.py's
     // get_sampling_capabilities()/_sampling_support -- so an exact
     // "provider:model" entry wins over the plain provider-keyed default.
@@ -206,6 +206,11 @@
     tempInput.min = caps.temperature.min;
     tempInput.max = caps.temperature.max;
     if (parseFloat(tempInput.value) > caps.temperature.max) tempInput.value = caps.temperature.max;
+    // Some models (Claude 5-generation, gpt-6-astra) reject temperature
+    // outright -- greyed out and not submitted, like top_p/top_k below.
+    var tempSupported = caps.temperature.supported !== false;
+    tempInput.disabled = !tempSupported;
+    if (els.temperature.cell) els.temperature.cell.classList.toggle('param-disabled', !tempSupported);
 
     ['top_p', 'top_k', 'frequency_penalty', 'presence_penalty', 'seed'].forEach(function (name) {
       var supported = caps[name] && caps[name].supported;

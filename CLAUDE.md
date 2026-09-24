@@ -169,7 +169,9 @@ app/
     analytics_service.py   # mv_analytics_flat aggregation, market trend
     avm_service.py, gis_service.py, comparable_service.py
     llm/                    # Phase 7 RAG: providers.py (chat model factory,
-                            #   3 tiers x 3 providers), embeddings.py,
+                            #   3 tiers x 4 providers, per-model capability
+                            #   quirks, structured_output() helper),
+                            #   embeddings.py,
                             #   listing_doc.py (text serialization),
                             #   retriever.py (hybrid SQL-filter + pgvector search),
                             #   tools.py (bound tool-calling functions),
