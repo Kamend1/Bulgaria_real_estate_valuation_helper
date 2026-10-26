@@ -419,13 +419,13 @@ function calcIncome() {
   ithead.innerHTML = '<tr><th>Cap Rate ↓ / Наем →</th>' +
     rentLabels.map((l, i) => {
       const isBase = i === baseColIdx;
-      return '<th' + (isBase ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' + l + '</th>';
+      return '<th' + (isBase ? ' style="background:var(--brand-dark)"' : '') + '>' + l + '</th>';
     }).join('') + '</tr>';
 
   itbody.innerHTML = matrix.map((row, ri) => {
     const isBaseRow = ri === 2;
     return '<tr>' +
-      '<th' + (isBaseRow ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' +
+      '<th' + (isBaseRow ? ' style="background:var(--brand-dark)"' : '') + '>' +
       (capVars[ri] * 100).toFixed(1) + '%</th>' +
       row.map((val, ci) => {
         const isBase = isBaseRow && ci === baseColIdx;

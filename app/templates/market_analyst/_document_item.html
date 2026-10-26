@@ -18,6 +18,6 @@
     <pre style="white-space:pre-wrap;font-size:0.78rem;margin-top:0.3rem">{{ doc.extracted_data | pprint }}</pre>
   </details>
   {% elif doc.status == "failed" %}
-  <p class="hint" style="color:var(--error,#dc2626);margin-top:0.2rem">{{ doc.error_message }}</p>
+  <p class="hint" style="color:var(--error);margin-top:0.2rem">{{ doc.error_message }}</p>
   {% endif %}
 </div>

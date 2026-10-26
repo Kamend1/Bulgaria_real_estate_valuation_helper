@@ -180,7 +180,7 @@
 
     <!-- Factor breakdown row (hidden by default, toggled by "по фактори"/"✎ корекции") -->
     <tr class="adj-factor-row" id="adj-factor-row-{{ item.pool_id }}" style="display:none">
-      <td colspan="11" style="background:var(--bg-alt,#f8fafc);padding:0.5rem 0.75rem">
+      <td colspan="11" style="background:var(--bg-alt);padding:0.5rem 0.75rem">
         <form hx-post="/comparables/adjustment/{{ item.pool_id }}"
               hx-target="#pool-panel-{{ ctype }}"
               hx-swap="outerHTML"

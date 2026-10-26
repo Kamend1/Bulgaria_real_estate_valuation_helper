@@ -8,18 +8,13 @@
   align-items: flex-start;
   gap: 1rem;
   padding: 1rem 1.25rem;
-  border-radius: 8px;
+  border-radius: 5px;
   border-left: 4px solid;
   margin-bottom: 1.25rem;
 }
-.data-status-card.status-ok    { border-left-color: #10b981; background: #f0fdf4; }
-.data-status-card.status-warn  { border-left-color: #f59e0b; background: #fffbeb; }
-.data-status-card.status-error { border-left-color: #ef4444; background: #fef2f2; }
-@media (prefers-color-scheme: dark) {
-  .data-status-card.status-ok    { background: #052e16; }
-  .data-status-card.status-warn  { background: #1c1400; }
-  .data-status-card.status-error { background: #1c0000; }
-}
+.data-status-card.status-ok    { border-left-color: var(--forest); background: var(--success-bg); }
+.data-status-card.status-warn  { border-left-color: #c58a2b; background: var(--warning-bg); }
+.data-status-card.status-error { border-left-color: var(--error); background: var(--error-bg); }
 .data-status-icon { font-size: 1.4rem; line-height: 1; flex-shrink: 0; margin-top: .1rem; }
 .data-status-label { font-weight: 600; font-size: .95rem; }
 .data-status-detail { font-size: .82rem; color: var(--text-muted); margin-top: .15rem; }

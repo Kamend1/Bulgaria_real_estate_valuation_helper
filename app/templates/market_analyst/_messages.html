@@ -54,7 +54,7 @@
      parsed JSON, not which tool produced it. #}
   {% elif msg.role == "tool" and msg.parsed and msg.parsed.rows is defined and msg.parsed.group_by is defined %}
   <div class="chat-msg chat-msg-tool-result">
-    <div class="proposal-card" style="background:#f8fafc;border-color:#e2e8f0;max-width:94%">
+    <div class="proposal-card" style="background:var(--surface-2);border-color:var(--border);max-width:94%">
       <div class="hint" style="margin-bottom:0.4rem">
         📊 {{ msg.parsed.rows|length }} резултата — {{ GROUP_BY_LABELS.get(msg.parsed.group_by, msg.parsed.group_by) }}
         {% if msg.parsed.n_runs_included %}(последните {{ msg.parsed.n_runs_included }} засичания){% endif %}

@@ -10,14 +10,9 @@
   font-size: .85rem;
   font-weight: 600;
 }
-.status-badge.status-completed   { background: #d1fae5; color: #065f46; }
-.status-badge.status-failed      { background: #fee2e2; color: #991b1b; }
-.status-badge.status-interrupted { background: #fef3c7; color: #92400e; }
-@media (prefers-color-scheme: dark) {
-  .status-badge.status-completed   { background: #064e3b; color: #6ee7b7; }
-  .status-badge.status-failed      { background: #7f1d1d; color: #fca5a5; }
-  .status-badge.status-interrupted { background: #78350f; color: #fde68a; }
-}
+.status-badge.status-completed   { background: var(--success-bg); color: #2f4f2d; }
+.status-badge.status-failed      { background: var(--error-bg); color: #7a2d27; }
+.status-badge.status-interrupted { background: var(--warning-bg); color: var(--warning); }
 .run-meta-row {
   display: flex;
   gap: 1rem;
@@ -34,8 +29,6 @@
 .run-stats dt {
   font-size: .75rem;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: .05em;
 }
 .run-stats dd {
   font-size: 1.4rem;
@@ -48,23 +41,23 @@
   color: var(--text-muted);
 }
 .error-box {
-  background: #fef2f2;
-  border: 1px solid #fca5a5;
+  background: var(--error-bg);
+  border: 1px solid #d9a9a3;
   border-radius: 6px;
   padding: .75rem 1rem;
   font-size: .85rem;
   white-space: pre-wrap;
   word-break: break-all;
   margin-top: .75rem;
-  color: #991b1b;
+  color: #7a2d27;
 }
 .log-section-heading {
   font-size: 1rem;
   margin-bottom: .75rem;
 }
 .scrape-log-box {
-  background: var(--bg-secondary, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: .75rem 1rem;
   font-size: .78rem;

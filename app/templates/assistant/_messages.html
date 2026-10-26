@@ -58,7 +58,7 @@
 
   {% elif msg.role == "tool" and msg.parsed and msg.parsed.overall_assessment is defined %}
   <div class="chat-msg chat-msg-proposal">
-    <div class="proposal-card" style="background:#eff6ff;border-color:#bfdbfe">
+    <div class="proposal-card" style="background:var(--brand-tint);border-color:#b9c9d2">
       <div class="hint" style="margin-bottom:0.3rem">🔎 Критичен преглед (отделен анализ)</div>
       <p style="margin:0 0 0.4rem"><strong>{{ msg.parsed.overall_assessment }}</strong></p>
       {% if msg.parsed.consistency_issues %}

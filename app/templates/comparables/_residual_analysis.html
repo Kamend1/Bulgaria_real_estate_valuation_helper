@@ -450,13 +450,13 @@
     thead.innerHTML = '<tr><th>Стр. ↓ / Цена →</th>' +
       priceLabels.map(function(l, i) {
         var isBase = i === baseColIdx;
-        return '<th' + (isBase ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' + l + '</th>';
+        return '<th' + (isBase ? ' style="background:var(--brand-dark)"' : '') + '>' + l + '</th>';
       }).join('') + '</tr>';
 
     tbody.innerHTML = matrix.map(function(row, ri) {
       var isBaseRow = ri === 2;
       return '<tr>' +
-        '<th' + (isBaseRow ? ' style="background:var(--brand-dark,#0c2340)"' : '') + '>' + LABELS[ri] + '</th>' +
+        '<th' + (isBaseRow ? ' style="background:var(--brand-dark)"' : '') + '>' + LABELS[ri] + '</th>' +
         row.map(function(val, ci) {
           var isBase  = isBaseRow && ci === baseColIdx;
           var bg      = _sensColor(val, allVals);

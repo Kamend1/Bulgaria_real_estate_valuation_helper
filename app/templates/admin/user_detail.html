@@ -92,8 +92,8 @@
     </form>
   </section>
 
-  <section class="card" style="border-left:3px solid #ef4444">
-    <h2 style="color:#ef4444">Опасна зона</h2>
+  <section class="card" style="border-left:3px solid var(--error)">
+    <h2 style="color:var(--error)">Опасна зона</h2>
     <form method="post" action="/admin/users/{{ target.id }}/delete"
           onsubmit="return confirm('Изтриване на потребител {{ target.username }}? Действието е необратимо!')">
       <button type="submit" class="btn btn-danger btn-sm">Изтрий потребителя</button>

@@ -98,7 +98,7 @@
     </thead>
     <tbody>
       {% for b in cadastre.buildings %}
-      <tr {% if b.cadastral_id == cadastre.highlighted_building_id %}style="font-weight:600;background:var(--brand-light,rgba(255,200,0,0.15))"{% endif %}>
+      <tr {% if b.cadastral_id == cadastre.highlighted_building_id %}style="font-weight:600;background:var(--brand-light)"{% endif %}>
         <td>{{ b.cadastral_id }}{% if b.cadastral_id == cadastre.highlighted_building_id %} ←{% endif %}</td>
         <td>{{ b.floors_above_ground if b.floors_above_ground is not none else '—' }}</td>
         <td>{{ b.dwellings if b.dwellings is not none else '—' }}</td>

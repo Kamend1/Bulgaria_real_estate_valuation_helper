@@ -57,7 +57,7 @@
         <div style="flex:1;background:var(--border);border-radius:3px;height:0.9rem;position:relative;overflow:hidden">
           <div style="position:absolute;top:0;bottom:0;{{ 'left:50%' if f.shap_value >= 0 else 'right:50%' }};
                       width:{{ ((f.shap_value | abs) / max_abs * 50) if max_abs else 0 }}%;
-                      background:{{ '#2f7d4f' if f.shap_value >= 0 else '#b23b3b' }}"></div>
+                      background:{{ '#526450' if f.shap_value >= 0 else '#9a3b33' }}"></div>
         </div>
         <span style="flex:0 0 4.5rem;font-family:monospace">{{ '%+.3f' % f.shap_value }}</span>
       </div>

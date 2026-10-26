@@ -22,8 +22,6 @@
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     margin-bottom: 0.3rem;
   }
   .filter-group select {
@@ -47,7 +45,7 @@
     display: inline-block;
     line-height: 1.6;
   }
-  .btn-reset:hover { background: #f1f5f9; color: var(--text); }
+  .btn-reset:hover { background: var(--surface-2); color: var(--text); }
 
   /* KPI row */
   .kpi-row {
@@ -59,15 +57,13 @@
   .kpi-card {
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 5px;
     padding: 1rem 1.25rem;
   }
   .kpi-label {
     font-size: 0.75rem;
     color: var(--muted);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     margin-bottom: 0.35rem;
   }
   .kpi-value {
@@ -103,21 +99,19 @@
   .chart-card {
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 5px;
     padding: 1.25rem 1.5rem;
   }
   .chart-title {
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     margin-bottom: 0.75rem;
   }
   .chart-full {
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 5px;
     padding: 1.25rem 1.5rem;
     margin-bottom: 1rem;
   }
@@ -148,7 +142,7 @@
     cursor: pointer;
     color: var(--muted);
   }
-  .btn-admin-refresh:hover { background: #f1f5f9; color: var(--text); }
+  .btn-admin-refresh:hover { background: var(--surface-2); color: var(--text); }
 </style>
 {% endblock %}
 
@@ -351,7 +345,7 @@ const labels = TREND.map(r => r.run_date);
 
 const FONT = { family: "system-ui, -apple-system, sans-serif", size: 12 };
 Chart.defaults.font = FONT;
-Chart.defaults.color = "#64748b";
+Chart.defaults.color = "#52616a";
 
 document.addEventListener("DOMContentLoaded", () => {
 
@@ -363,7 +357,7 @@ document.addEventListener("DOMContentLoaded", () => {
       datasets: [{
         label: "Брой обяви",
         data: TREND.map(r => r.n_listings),
-        backgroundColor: "rgba(37, 99, 235, 0.65)",
+        backgroundColor: "rgba(18, 63, 81, 0.72)",
         borderRadius: 3,
       }]
     },
@@ -385,8 +379,8 @@ document.addEventListener("DOMContentLoaded", () => {
       datasets: [{
         label: "Медиана DOM (дни)",
         data: TREND.map(r => r.median_dom),
-        borderColor: "#d97706",
-        backgroundColor: "rgba(217, 119, 6, 0.12)",
+        borderColor: "#8a5a12",
+        backgroundColor: "rgba(163, 178, 154, 0.28)",
         borderWidth: 2,
         pointRadius: 4,
         tension: 0.35,
@@ -413,7 +407,7 @@ document.addEventListener("DOMContentLoaded", () => {
           label: "P75 EUR/кв.м",
           data: TREND.map(r => r.p75_ppsqm),
           borderColor: "transparent",
-          backgroundColor: "rgba(37, 99, 235, 0.10)",
+          backgroundColor: "rgba(18, 63, 81, 0.10)",
           pointRadius: 0,
           fill: "+1",
           tension: 0.35,
@@ -422,7 +416,7 @@ document.addEventListener("DOMContentLoaded", () => {
           label: "P25 EUR/кв.м",
           data: TREND.map(r => r.p25_ppsqm),
           borderColor: "transparent",
-          backgroundColor: "rgba(37, 99, 235, 0.10)",
+          backgroundColor: "rgba(18, 63, 81, 0.10)",
           pointRadius: 0,
           fill: false,
           tension: 0.35,
@@ -430,8 +424,8 @@ document.addEventListener("DOMContentLoaded", () => {
         {
           label: "Медиана EUR/кв.м",
           data: TREND.map(r => r.median_ppsqm),
-          borderColor: "#2563eb",
-          backgroundColor: "#2563eb",
+          borderColor: "#123f51",
+          backgroundColor: "#123f51",
           borderWidth: 2.5,
           pointRadius: 4,
           pointHoverRadius: 6,
@@ -441,8 +435,8 @@ document.addEventListener("DOMContentLoaded", () => {
         {
           label: "Средна EUR/кв.м",
           data: TREND.map(r => r.mean_ppsqm),
-          borderColor: "#94a3b8",
-          backgroundColor: "#94a3b8",
+          borderColor: "#a3b29a",
+          backgroundColor: "#a3b29a",
           borderWidth: 1.5,
           borderDash: [5, 4],
           pointRadius: 2,
@@ -484,19 +478,19 @@ document.addEventListener("DOMContentLoaded", () => {
           {
             label: "Намалени цени",
             data: REPEAT.map(r => r.n_reduced),
-            backgroundColor: "rgba(22, 163, 74, 0.75)",
+            backgroundColor: "rgba(82, 100, 80, 0.78)",
             borderRadius: 3,
           },
           {
             label: "Стабилни",
             data: REPEAT.map(r => r.n_stable),
-            backgroundColor: "rgba(100, 116, 139, 0.55)",
+            backgroundColor: "rgba(163, 178, 154, 0.7)",
             borderRadius: 3,
           },
           {
             label: "Увеличени цени",
             data: REPEAT.map(r => r.n_increased),
-            backgroundColor: "rgba(220, 38, 38, 0.65)",
+            backgroundColor: "rgba(154, 59, 51, 0.7)",
             borderRadius: 3,
           },
         ]
